@@ -1,0 +1,63 @@
+# Anima Style LoRA preset.
+#
+# Tuned for style training where you want a broad sample of compositions.
+# Compared to defaults: more frames per scene, slightly looser blur gate,
+# smaller dedup distance to keep variety.
+#
+# Source citations:
+# - I:\Lora trainer\anima_lora\TRAINING.md  -> resolution 1024, min_pixels 500_000
+# - I:\Lora trainer\anima_lora\configs\base.toml  -> bucket_step 64, min/max bucket
+description = "Anima Style LoRA — broad sampling, style coverage. Recommended for MMD style sets."
+
+# Sampling: hybrid catches both cuts and long static shots.
+sampling = "hybrid"
+scene_threshold = 27.0
+frames_per_scene = 6
+interval_seconds = 2.5
+
+# Quality: MMD has lots of motion blur (camera and character moving constantly).
+# Threshold 50 keeps frames with mild motion blur — anything below this is
+# obviously soft. Bump to 100+ for clean studio renders.
+blur_threshold = 50.0
+min_brightness = 15.0
+max_brightness = 245.0
+min_contrast = 10.0
+
+# Letterbox is common in MMD videos (vertical character render in 16:9).
+detect_letterbox = true
+letterbox_threshold = 16
+letterbox_min_ratio = 0.98
+
+# Bucketing — Anima official defaults.
+resolution = 1024
+min_bucket = 512
+max_bucket = 2048
+bucket_step = 64
+min_pixels = 500000
+resize_mode = "cover"
+
+# Dedup: tighter than default to preserve variety in a style set.
+dedup = true
+phash_size = 8
+phash_distance = 4
+
+# Diversity: SSIM + color ensure pose and lighting variety.
+ssim_filter = true
+ssim_threshold = 0.85
+color_diversity = true
+color_distance = 0.08
+completeness_filter = false
+
+# Auto-quality: let the tool figure out the right blur threshold per video.
+auto_quality = true
+auto_quality_percentile = 60.0
+
+# Decode: keyframe mode for speed on 60fps MMD.
+decode_mode = "keyframe"
+
+# Gallery: always generate for visual QA.
+contact_sheet = true
+html_gallery = true
+
+output_format = "png"
+skip_existing = true

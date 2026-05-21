@@ -1,0 +1,48 @@
+# Anima Character LoRA preset.
+#
+# Tuned for character likeness: fewer but sharper frames, looser dedup
+# (don't drop similar poses — repetition reinforces likeness).
+description = "Anima Character LoRA — strict quality, fewer frames, looser dedup."
+
+sampling = "hybrid"
+scene_threshold = 27.0
+frames_per_scene = 4
+interval_seconds = 3.0
+
+# Strict quality: character LoRAs need sharp frames.
+blur_threshold = 130.0
+min_brightness = 25.0
+max_brightness = 240.0
+min_contrast = 18.0
+
+detect_letterbox = true
+letterbox_threshold = 16
+letterbox_min_ratio = 0.98
+
+resolution = 1024
+min_bucket = 512
+max_bucket = 2048
+bucket_step = 64
+min_pixels = 500000
+resize_mode = "cover"
+
+# Looser dedup — okay if multiple frames look alike for character.
+dedup = true
+phash_size = 8
+phash_distance = 8
+
+# Diversity: SSIM on, color off (same lighting is fine for character).
+ssim_filter = true
+ssim_threshold = 0.80
+color_diversity = false
+completeness_filter = true
+completeness_threshold = 0.40
+
+auto_quality = true
+auto_quality_percentile = 50.0
+decode_mode = "keyframe"
+contact_sheet = true
+html_gallery = true
+
+output_format = "png"
+skip_existing = true

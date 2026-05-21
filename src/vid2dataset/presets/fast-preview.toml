@@ -1,0 +1,42 @@
+# Fast preview preset.
+#
+# For checking what your videos contain before committing to a full run.
+# Outputs JPG thumbnails at 768 long-edge, only one frame per scene, no
+# heavy filtering. Roughly 5-10x faster than the standard preset.
+description = "Fast preview — JPG, 768px, one frame per scene. ~10x faster than default."
+
+sampling = "scene"
+scene_threshold = 30.0
+frames_per_scene = 1
+interval_seconds = 5.0
+
+blur_threshold = 60.0
+min_brightness = 10.0
+max_brightness = 250.0
+min_contrast = 5.0
+
+detect_letterbox = true
+
+# Smaller bucket grid — preview only.
+resolution = 768
+min_bucket = 384
+max_bucket = 1024
+bucket_step = 64
+min_pixels = 200000
+resize_mode = "cover"
+
+dedup = true
+phash_size = 8
+phash_distance = 6
+
+ssim_filter = false
+color_diversity = false
+completeness_filter = false
+auto_quality = false
+decode_mode = "keyframe"
+contact_sheet = true
+html_gallery = true
+
+output_format = "jpg"
+jpg_quality = 85
+skip_existing = true

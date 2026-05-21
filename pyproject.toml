@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vid2dataset"
+version = "0.1.0"
+description = "Smart video-to-image extractor for LoRA training sets, tuned for Anima/SDXL bucketing."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "vid2dataset contributors" }]
+keywords = ["lora", "training-set", "anima", "sdxl", "video", "screenshot", "mmd"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+dependencies = [
+    "opencv-python-headless>=4.9",
+    "scenedetect>=0.6.4",
+    "imagehash>=4.3",
+    "pillow>=10.0",
+    "numpy>=1.26",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "customtkinter>=5.2",
+    "tomli>=2.0; python_version < '3.11'",
+    "tomli-w>=1.0",
+]
+
+[project.optional-dependencies]
+gui = ["gradio>=4.30"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+vid2dataset = "vid2dataset.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/peter119lee/vid2dataset"
+Issues = "https://github.com/peter119lee/vid2dataset/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vid2dataset"]
+
+[tool.hatch.build]
+include = ["src/vid2dataset/presets/*.toml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
