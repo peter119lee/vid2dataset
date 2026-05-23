@@ -27,8 +27,15 @@ def test_sanitize_truncates() -> None:
 
 
 def test_sanitize_falls_back_to_default() -> None:
-    assert sanitize_stem("///") == "video"
-    assert sanitize_stem("") == "video"
+    # Empty / special-only stems get a unique hash suffix to avoid collisions
+    a = sanitize_stem("///")
+    b = sanitize_stem("\\\\\\")
+    e = sanitize_stem("")
+    assert a.startswith("video")
+    assert b.startswith("video")
+    assert e.startswith("video")
+    # Different inputs should give different stems
+    assert a != b
 
 
 def test_discover_videos_single_file(tmp_path: Path) -> None:

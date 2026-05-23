@@ -44,6 +44,7 @@ from vid2dataset.crop import detect_letterbox
 from vid2dataset.dedup import DedupIndex, hash_image
 from vid2dataset.diversity import DiversityFilter
 from vid2dataset.gallery import generate_contact_sheet, generate_html_gallery
+from vid2dataset.hardware import auto_detect_workers
 from vid2dataset.io_utils import (
     VideoMeta,
     discover_videos,
@@ -52,6 +53,7 @@ from vid2dataset.io_utils import (
     sanitize_stem,
     write_image,
 )
+from vid2dataset.keyframe_decoder import extract_keyframes, has_ffmpeg
 from vid2dataset.quality import evaluate_frame
 from vid2dataset.resize import (
     Bucket,
@@ -285,9 +287,20 @@ def _process_video(
     if effective_max and effective_min > effective_max:
         effective_min = effective_max
 
-    for n, (idx, frame_bgr) in enumerate(
-        read_frames_at(video, indices, seek_accurate=seek_mode)
-    ):
+    # Choose frame source: ffmpeg I-frames (fast) or OpenCV exact seek
+    if cfg.decode_mode == "keyframe" and has_ffmpeg():
+        # ffmpeg path: stream all keyframes, ignore indices, treat ts*fps as idx
+        def _frame_source():
+            try:
+                for ts, fr in extract_keyframes(video, max_count=200):
+                    yield int(ts * (meta.fps or 30)), fr
+            except (ImportError, OSError) as e:
+                log.warning("ffmpeg path failed (%s); falling back to OpenCV", e)
+                yield from read_frames_at(video, indices, seek_accurate=seek_mode)
+        frame_iter = _frame_source()
+    else:
+        frame_iter = read_frames_at(video, indices, seek_accurate=seek_mode)
+    for n, (idx, frame_bgr) in enumerate(frame_iter):
         if cancel_event is not None and cancel_event.is_set():
             log.info("Cancel requested, stopping %s", video.name)
             break
@@ -503,7 +516,13 @@ def run_pipeline(
         todo.append(video)
 
     completed = 0
-    n_workers = max(1, min(cfg.workers, len(todo))) if todo else 1
+    if todo:
+        # cfg.workers=0 means auto, otherwise treat as user override
+        override = cfg.workers if cfg.workers and cfg.workers > 0 else None
+        n_workers, worker_reason = auto_detect_workers(todo, user_override=override)
+        log.info("Workers: %s", worker_reason)
+    else:
+        n_workers = 1
 
     def _process_one(video: Path, seq_off: int) -> VideoStats | None:
         if cancel_event and cancel_event.is_set():

@@ -34,6 +34,7 @@ dependencies = [
     "pydantic-settings>=2.2",
     "customtkinter>=5.2",
     "imageio-ffmpeg>=0.4",
+    "psutil>=5.9",
     "tomli>=2.0; python_version < '3.11'",
     "tomli-w>=1.0",
 ]

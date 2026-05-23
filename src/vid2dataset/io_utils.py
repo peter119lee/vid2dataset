@@ -45,18 +45,26 @@ _INVALID_FS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def sanitize_stem(s: str, *, max_len: int = 80) -> str:
-    """Make ``s`` safe to use as a filename stem on Windows + POSIX.
+    """Make ``s`` safe + globally unique as a filename stem.
 
-    - NFC-normalise unicode (so Chinese chars don't double-encode)
+    - NFC-normalise unicode
     - Strip path separators and reserved characters
-    - Collapse whitespace to single underscore
-    - Truncate to ``max_len`` (after sanitising)
+    - Collapse whitespace to underscore
+    - If the result was truncated or fell back to ``video``, append
+      a short hash of the original to avoid collisions.
     """
+    import hashlib
+    original = s
     s = unicodedata.normalize("NFC", s)
     s = _INVALID_FS_CHARS.sub("", s)
     s = re.sub(r"\s+", "_", s).strip("_.")
+    needs_hash = (not s) or (len(s) > max_len)
     if not s:
         s = "video"
+    if needs_hash:
+        suffix = hashlib.md5(original.encode("utf-8", errors="replace")).hexdigest()[:8]
+        max_base = max_len - 9
+        s = s[:max_base] + "_" + suffix
     return s[:max_len]
 
 

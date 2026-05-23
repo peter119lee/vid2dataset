@@ -273,11 +273,11 @@ class ExtractConfig(BaseModel):
 
     # ── Performance / housekeeping ──────────────────────────────────
     workers: int = Field(
-        2,
-        ge=1,
+        0,
+        ge=0,
         le=32,
-        description="Parallel worker processes. OpenCV decoding is GIL-bound, "
-        "so 2-4 is usually enough.",
+        description="Parallel video workers. 0 = auto-detect based on CPU/RAM. "
+        "Set explicitly to override (e.g. 1 for low-RAM machines).",
     )
     seek_accurate: bool = Field(
         True,

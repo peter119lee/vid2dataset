@@ -24,6 +24,12 @@ from vid2dataset.config import ExtractConfig
 from vid2dataset.extractor import run_pipeline
 from vid2dataset.i18n import t
 from vid2dataset.presets import list_presets, load_preset
+from vid2dataset.tooltip import Tooltip
+
+try:
+    import windnd
+except ImportError:
+    windnd = None
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -58,6 +64,10 @@ class App(ctk.CTk):
         # Restore paths
         if self.prefs.get("input"):
             self.input_entry.insert(0, self.prefs["input"])
+        # Enable drag-and-drop of folders onto the window
+        if windnd is not None:
+            with contextlib.suppress(Exception):
+                windnd.hook_dropfiles(self, func=self._on_drop)
         if self.prefs.get("output"):
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, self.prefs["output"])
@@ -129,7 +139,9 @@ class App(ctk.CTk):
             ("color_distance", "0.08", "tip_color", 2, 2),
             ("frames_per_scene", "6", "tip_frames", 2, 3),
         ]
-        for key, default, _tip_key, row, col in params:
+        self._param_tooltips: dict[str, Tooltip] = {}
+        self._param_tip_keys: dict[str, str] = {}
+        for key, default, tip_key, row, col in params:
             f = ctk.CTkFrame(settings, fg_color="transparent")
             f.grid(row=row, column=col, padx=10, pady=3, sticky="w")
             lbl = ctk.CTkLabel(f, text=t(key, self.lang), font=ctk.CTkFont(size=11))
@@ -139,6 +151,12 @@ class App(ctk.CTk):
             entry.insert(0, default)
             entry.pack(anchor="w")
             self._params[key] = entry
+            self._param_tip_keys[key] = tip_key
+            tk_widget = entry
+            tip = Tooltip(tk_widget, lambda k=tip_key: t(k, self.lang))
+            self._param_tooltips[key] = tip
+            tip_lbl = Tooltip(lbl, lambda k=tip_key: t(k, self.lang))
+            self._param_tooltips[key + '_lbl'] = tip_lbl
 
         # Checkboxes
         chk = ctk.CTkFrame(settings, fg_color="transparent")
@@ -176,6 +194,22 @@ class App(ctk.CTk):
         self.log_box.grid(row=5, column=0, sticky="nsew", padx=24, pady=(4, 14))
 
     # ── Actions ──────────────────────────────────────────────────
+
+    def _on_drop(self, files: list[bytes]) -> None:
+        """Handle dropped files/folders. Take the first directory."""
+        if not files:
+            return
+        for raw in files:
+            try:
+                path = raw.decode("gbk") if isinstance(raw, bytes) else str(raw)
+            except Exception:
+                path = str(raw)
+            from pathlib import Path as _P
+            p = _P(path)
+            if p.is_dir() or p.is_file():
+                self.input_entry.delete(0, "end")
+                self.input_entry.insert(0, str(p))
+                break
 
     def _browse_input(self) -> None:
         p = filedialog.askdirectory(title=t("select_video_folder", self.lang))
