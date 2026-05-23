@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vid2dataset"
-version = "0.2.0"
+version = "0.3.0"
 description = "Smart video-to-image extractor for LoRA training sets, tuned for Anima/SDXL bucketing."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,6 +33,7 @@ dependencies = [
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
     "customtkinter>=5.2",
+    "imageio-ffmpeg>=0.4",
     "tomli>=2.0; python_version < '3.11'",
     "tomli-w>=1.0",
 ]

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import threading
 import time
+
+try:
+    import winsound
+except ImportError:
+    winsound = None
 import tkinter.filedialog as filedialog
 import tkinter.messagebox as messagebox
 from pathlib import Path
@@ -46,6 +52,7 @@ class App(ctk.CTk):
         self.prefs = _load_prefs()
         self.lang = self.prefs.get("lang", "en")
         self._running = False
+        self._cancel_event: threading.Event | None = None
         self._build()
         self._apply_preset(self.prefs.get("preset", "anima-style"))
         # Restore paths
@@ -149,14 +156,16 @@ class App(ctk.CTk):
         # Run
         run_frame = ctk.CTkFrame(self, fg_color="transparent")
         run_frame.grid(row=3, column=0, sticky="ew", padx=24, pady=6)
-        run_frame.grid_columnconfigure(1, weight=1)
+        run_frame.grid_columnconfigure(2, weight=1)
         self.run_btn = ctk.CTkButton(run_frame, text=t("extract", self.lang), font=ctk.CTkFont(size=14, weight="bold"), height=42, command=self._start)
-        self.run_btn.grid(row=0, column=0, padx=(0, 12))
+        self.run_btn.grid(row=0, column=0, padx=(0, 8))
+        self.cancel_btn = ctk.CTkButton(run_frame, text=t("cancel", self.lang), height=42, width=80, command=self._cancel, state="disabled", fg_color="#8b3a3a", hover_color="#a04848")
+        self.cancel_btn.grid(row=0, column=1, padx=(0, 12))
         self.progress = ctk.CTkProgressBar(run_frame, mode="indeterminate", height=8)
-        self.progress.grid(row=0, column=1, sticky="ew")
+        self.progress.grid(row=0, column=2, sticky="ew")
         self.progress.set(0)
         self.open_btn = ctk.CTkButton(run_frame, text=t("open_output", self.lang), width=140, command=self._open_output, state="disabled")
-        self.open_btn.grid(row=0, column=2, padx=(12, 0))
+        self.open_btn.grid(row=0, column=3, padx=(12, 0))
 
         # Status
         self.status_var = ctk.StringVar(value=t("ready", self.lang))
@@ -306,6 +315,7 @@ class App(ctk.CTk):
         self.output_btn.configure(text=t("browse", self.lang))
         self.preset_lbl.configure(text=t("preset", self.lang))
         self.run_btn.configure(text=t("extract", self.lang))
+        self.cancel_btn.configure(text=t("cancel", self.lang))
         self.open_btn.configure(text=t("open_output", self.lang))
         self.chk_auto.configure(text=t("auto_quality", self.lang))
         self.chk_kf.configure(text=t("keyframe", self.lang))
@@ -354,7 +364,9 @@ class App(ctk.CTk):
         _save_prefs(self.prefs)
 
         self._running = True
+        self._cancel_event = threading.Event()
         self.run_btn.configure(state="disabled", text=t("running", self.lang))
+        self.cancel_btn.configure(state="normal")
         self.open_btn.configure(state="disabled")
         self.progress.start()
         self.log_box.configure(state="normal")
@@ -417,7 +429,7 @@ class App(ctk.CTk):
                             t("processing", self.lang, name=Path(videos[c]).stem[:20], current=c + 1, total=total_videos)
                         ))
 
-            result = run_pipeline(cfg, progress=progress_cb)
+            result = run_pipeline(cfg, progress=progress_cb, cancel_event=self._cancel_event)
 
             done_msg = t("done", self.lang, count=result.total_written, time=result.elapsed_s)
             self.after(0, lambda: self.status_var.set(done_msg))
@@ -436,11 +448,21 @@ class App(ctk.CTk):
             logging.getLogger().removeHandler(handler)
             self.after(0, self._done)
 
+    def _cancel(self) -> None:
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+            self.cancel_btn.configure(state="disabled", text=t("cancelling", self.lang))
+
     def _done(self) -> None:
         self._running = False
+        self._cancel_event = None
         self.run_btn.configure(state="normal", text=t("extract", self.lang))
+        self.cancel_btn.configure(state="disabled", text=t("cancel", self.lang))
         self.progress.stop()
         self.progress.set(0)
+        if winsound is not None:
+            with contextlib.suppress(Exception):
+                winsound.MessageBeep(winsound.MB_OK)
 
 
 class _LogHandler(logging.Handler):

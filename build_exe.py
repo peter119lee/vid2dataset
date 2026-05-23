@@ -52,6 +52,7 @@ def main() -> None:
         "scenedetect.detectors",
         "scenedetect.detectors.content_detector",
         "imagehash",
+        "imageio_ffmpeg",
         "pydantic",
     ]
 

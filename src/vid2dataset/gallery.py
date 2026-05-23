@@ -6,6 +6,7 @@ inspect the entire dataset without opening hundreds of files.
 
 from __future__ import annotations
 
+import html
 import logging
 from pathlib import Path
 
@@ -39,7 +40,11 @@ def generate_contact_sheet(
     sheet = np.full((sheet_h, sheet_w, 3), 32, dtype=np.uint8)
 
     for i, p in enumerate(paths):
-        img = cv2.imread(str(p))
+        try:
+            data = np.fromfile(str(p), dtype=np.uint8)
+            img = cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
+        except Exception:
+            img = None
         if img is None:
             continue
         h, w = img.shape[:2]
@@ -53,7 +58,9 @@ def generate_contact_sheet(
         sheet[y : y + nh, x : x + nw] = thumb
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(output_path), sheet, [cv2.IMWRITE_PNG_COMPRESSION, 6])
+    ok, buf = cv2.imencode(".png", sheet, [cv2.IMWRITE_PNG_COMPRESSION, 6])
+    if ok:
+        output_path.write_bytes(buf.tobytes())
     log.info("Contact sheet: %s (%d images, %dx%d)", output_path, len(paths), sheet_w, sheet_h)
     return output_path
 
@@ -81,11 +88,11 @@ def generate_html_gallery(
         except ValueError:
             rel = p
         rows.append(
-            f'<div class="card"><img loading="lazy" src="{rel.as_posix()}" '
-            f'alt="{p.stem}"><span>{p.stem}</span></div>'
+            f'<div class="card"><img loading="lazy" src="{html.escape(rel.as_posix())}" '
+            f'alt="{html.escape(p.stem)}"><span>{html.escape(p.stem)}</span></div>'
         )
 
-    html = f"""<!DOCTYPE html>
+    html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -110,6 +117,6 @@ h1 {{ font-size: 1.4rem; margin-bottom: 12px; }}
 </body>
 </html>"""
 
-    output_path.write_text(html, encoding="utf-8")
+    output_path.write_text(html_content, encoding="utf-8")
     log.info("HTML gallery: %s (%d images)", output_path, len(image_paths))
     return output_path

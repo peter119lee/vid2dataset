@@ -26,8 +26,10 @@ from __future__ import annotations
 import heapq
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -173,14 +175,21 @@ def _stats_path(cfg: ExtractConfig, video: Path) -> Path:
     return _output_dir_for(cfg, video) / "_stats.json"
 
 
+class _NullLock:
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
 def _process_video(
     video: Path,
     *,
     cfg: ExtractConfig,
     buckets: list[Bucket],
     dedup_index: DedupIndex | None,
+    dedup_lock: threading.Lock | None = None,
     seq_offset: int,
     progress: ProgressCallback | None,
+    cancel_event: threading.Event | None = None,
 ) -> VideoStats:
     """Extract frames from a single video."""
     t0 = time.perf_counter()
@@ -279,6 +288,9 @@ def _process_video(
     for n, (idx, frame_bgr) in enumerate(
         read_frames_at(video, indices, seek_accurate=seek_mode)
     ):
+        if cancel_event is not None and cancel_event.is_set():
+            log.info("Cancel requested, stopping %s", video.name)
+            break
         if progress and (n % 4 == 0):
             progress("decode", n, len(indices))
 
@@ -349,9 +361,11 @@ def _process_video(
             continue
 
         # pHash dedup.
+        h = None
         if cfg.dedup and dedup_index is not None:
             h = hash_image(out_img, hash_size=cfg.phash_size)
-            dup = dedup_index.is_duplicate(h)
+            with (dedup_lock if dedup_lock else _NullLock()):
+                dup = dedup_index.is_duplicate(h)
             if dup is not None:
                 stats.rejected_dup += 1
                 continue
@@ -368,8 +382,9 @@ def _process_video(
             ssim_filter.accept(out_img)
         if color_filter is not None:
             color_filter.accept(out_img)
-        if cfg.dedup and dedup_index is not None:
-            dedup_index.add(h, str(out_path))
+        if cfg.dedup and dedup_index is not None and h is not None:
+            with (dedup_lock if dedup_lock else _NullLock()):
+                dedup_index.add(h, str(out_path))
 
         stats.records.append(
             FrameRecord(
@@ -444,6 +459,7 @@ def run_pipeline(
     cfg: ExtractConfig,
     *,
     progress: ProgressCallback | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> PipelineResult:
     """Extract a training set from one video or a directory of videos."""
     logging.basicConfig(
@@ -476,33 +492,72 @@ def run_pipeline(
 
     t_start = time.perf_counter()
     all_stats: list[VideoStats] = []
-    seq_offset = 0
+    dedup_lock = threading.Lock() if dedup_index else None
 
-    for vi, video in enumerate(videos):
-        if progress:
-            progress("video", vi, len(videos))
-
+    # Filter out videos to skip up front
+    todo = []
+    for video in videos:
         if cfg.skip_existing and _stats_path(cfg, video).exists():
             log.info("Skip (already done): %s", video.name)
             continue
+        todo.append(video)
 
+    completed = 0
+    n_workers = max(1, min(cfg.workers, len(todo))) if todo else 1
+
+    def _process_one(video: Path, seq_off: int) -> VideoStats | None:
+        if cancel_event and cancel_event.is_set():
+            return None
         try:
-            vs = _process_video(
-                video,
-                cfg=cfg,
-                buckets=buckets,
-                dedup_index=dedup_index,
-                seq_offset=seq_offset,
-                progress=progress,
+            return _process_video(
+                video, cfg=cfg, buckets=buckets,
+                dedup_index=dedup_index, dedup_lock=dedup_lock,
+                seq_offset=seq_off, progress=progress, cancel_event=cancel_event,
             )
         except (cv2.error, OSError, ValueError) as e:
             log.error("Failed to process %s: %s", video.name, e)
-            continue
+            return None
 
-        all_stats.append(vs)
-        seq_offset += vs.written
-        if dedup_index and cfg.dedup_index:
-            dedup_index.save(cfg.dedup_index)
+    if n_workers <= 1 or len(todo) <= 1:
+        # Sequential path (preserves deterministic seq_offset)
+        seq_offset = 0
+        for vi, video in enumerate(todo):
+            if cancel_event and cancel_event.is_set():
+                log.info("Cancelled by user")
+                break
+            if progress:
+                progress("video", vi, len(todo))
+            vs = _process_one(video, seq_offset)
+            if vs is None:
+                continue
+            all_stats.append(vs)
+            seq_offset += vs.written
+            if dedup_index and cfg.dedup_index:
+                with dedup_lock:
+                    dedup_index.save(cfg.dedup_index)
+    else:
+        # Parallel path: each worker uses video stem prefix so files don't collide
+        log.info("Parallel processing with %d workers", n_workers)
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            future_to_video = {
+                pool.submit(_process_one, video, vi * 100000): video
+                for vi, video in enumerate(todo)
+            }
+            for future in as_completed(future_to_video):
+                if cancel_event and cancel_event.is_set():
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    log.info("Cancelled by user")
+                    break
+                vs = future.result()
+                completed += 1
+                if progress:
+                    progress("video", completed, len(todo))
+                if vs is None:
+                    continue
+                all_stats.append(vs)
+                if dedup_index and cfg.dedup_index:
+                    with dedup_lock:
+                        dedup_index.save(cfg.dedup_index)
 
     elapsed = time.perf_counter() - t_start
 
