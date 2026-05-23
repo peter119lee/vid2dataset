@@ -23,6 +23,7 @@ Wires all modules together:
 
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 import time
@@ -263,8 +264,12 @@ def _process_video(
     written_for_this_video = 0
     seek_mode = cfg.decode_mode != "keyframe"
 
-    # ALL frames that pass quality+resize go here as fallback for min guarantee.
-    all_quality_passed: list[tuple[int, np.ndarray, float, Bucket]] = []
+    # Bounded backup pool: top-K sharpest quality-passed frames for min guarantee.
+    # Prevents unbounded memory growth on long videos. K = min_per_video * 3
+    # gives selection headroom (favoring the sharpest of the sharpest).
+    backup_pool_size = max(cfg.min_per_video * 3, 5) if cfg.min_per_video > 0 else 0
+    # min-heap of (blur_score, frame_idx, image, bucket) - smallest blur popped first
+    backup_heap: list[tuple[float, int, np.ndarray, Bucket]] = []
 
     effective_max = cfg.max_per_video
     effective_min = cfg.min_per_video
@@ -325,8 +330,13 @@ def _process_video(
             stats.rejected_too_small += 1
             continue
 
-        # Frame passed quality + resize — save as backup for min guarantee.
-        all_quality_passed.append((idx, out_img, q.blur_score, bucket))
+        # Frame passed quality + resize — keep top-K sharpest as backup.
+        if backup_pool_size > 0:
+            entry = (q.blur_score, idx, out_img, bucket)
+            if len(backup_heap) < backup_pool_size:
+                heapq.heappush(backup_heap, entry)
+            elif q.blur_score > backup_heap[0][0]:
+                heapq.heapreplace(backup_heap, entry)
 
         # SSIM diversity.
         if ssim_filter is not None and not ssim_filter.is_diverse(out_img):
@@ -376,18 +386,21 @@ def _process_video(
             break
 
     # ── Min per-video guarantee ──────────────────────────────────
-    # If we didn't meet the minimum, pull from ALL quality-passed frames
-    # (sorted by sharpness). This is the REAL guarantee — it uses frames
-    # that passed quality+resize regardless of diversity/dedup rejection.
+    # Pull from the bounded backup heap (top-K sharpest frames that passed
+    # quality + resize, regardless of later diversity/dedup rejection).
     if effective_min > 0 and written_for_this_video < effective_min:
         needed = effective_min - written_for_this_video
         if effective_max:
             needed = min(needed, effective_max - written_for_this_video)
-        # Exclude already-written frame indices
+        # Sort heap entries by blur descending (sharpest first)
         written_indices = {r.frame_index for r in stats.records}
-        available = [c for c in all_quality_passed if c[0] not in written_indices]
-        available.sort(key=lambda x: x[2], reverse=True)  # sharpest first
-        for b_idx, b_img, b_blur, b_bucket in available[:needed]:
+        candidates = sorted(
+            (c for c in backup_heap if c[1] not in written_indices),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        added = 0
+        for b_blur, b_idx, b_img, b_bucket in candidates[:needed]:
             seq += 1
             stem = f"{sanitize_stem(video.stem)}_{seq:05d}"
             out_path = out_dir / f"{stem}.{cfg.output_format}"
@@ -407,10 +420,11 @@ def _process_video(
             )
             stats.written += 1
             written_for_this_video += 1
-        if needed > 0 and available:
+            added += 1
+        if added > 0:
             log.info(
                 "Min guarantee: added %d backup frames for %s",
-                min(needed, len(available)), video.name,
+                added, video.name,
             )
 
     stats.elapsed_s = time.perf_counter() - t0

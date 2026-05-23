@@ -7,6 +7,8 @@ import logging
 import os
 import threading
 import time
+import tkinter.filedialog as filedialog
+import tkinter.messagebox as messagebox
 from pathlib import Path
 
 import customtkinter as ctk
@@ -65,10 +67,15 @@ class App(ctk.CTk):
         header.grid(row=0, column=0, sticky="ew", padx=24, pady=(12, 4))
         header.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(header, text="vid2dataset", font=ctk.CTkFont(size=26, weight="bold")).grid(row=0, column=0, sticky="w")
+        self.update_btn = ctk.CTkButton(
+            header, text=t("check_update", self.lang), width=130,
+            command=self._check_update_async,
+        )
+        self.update_btn.grid(row=0, column=2, sticky="e", padx=(0, 6))
         self.lang_btn = ctk.CTkButton(header, text=t("lang_btn", self.lang), width=50, command=self._toggle_lang)
-        self.lang_btn.grid(row=0, column=2, sticky="e")
+        self.lang_btn.grid(row=0, column=3, sticky="e")
         self.subtitle_lbl = ctk.CTkLabel(header, text=t("subtitle", self.lang), font=ctk.CTkFont(size=12), text_color="#888")
-        self.subtitle_lbl.grid(row=1, column=0, columnspan=3, sticky="w")
+        self.subtitle_lbl.grid(row=1, column=0, columnspan=4, sticky="w")
 
         # I/O
         io = ctk.CTkFrame(self)
@@ -104,6 +111,7 @@ class App(ctk.CTk):
 
         # Params
         self._params: dict[str, ctk.CTkEntry] = {}
+        self._param_labels: dict[str, ctk.CTkLabel] = {}
         params = [
             ("resolution", "1024", "tip_resolution", 1, 0),
             ("blur_threshold", "50", "tip_blur", 1, 1),
@@ -114,17 +122,15 @@ class App(ctk.CTk):
             ("color_distance", "0.08", "tip_color", 2, 2),
             ("frames_per_scene", "6", "tip_frames", 2, 3),
         ]
-        for key, default, tip_key, row, col in params:
+        for key, default, _tip_key, row, col in params:
             f = ctk.CTkFrame(settings, fg_color="transparent")
             f.grid(row=row, column=col, padx=10, pady=3, sticky="w")
             lbl = ctk.CTkLabel(f, text=t(key, self.lang), font=ctk.CTkFont(size=11))
             lbl.pack(anchor="w")
-            # Store label ref for i18n refresh
-            lbl._i18n_key = key
+            self._param_labels[key] = lbl
             entry = ctk.CTkEntry(f, width=90)
             entry.insert(0, default)
             entry.pack(anchor="w")
-            entry._tooltip = t(tip_key, self.lang)
             self._params[key] = entry
 
         # Checkboxes
@@ -163,13 +169,13 @@ class App(ctk.CTk):
     # ── Actions ──────────────────────────────────────────────────
 
     def _browse_input(self) -> None:
-        p = ctk.filedialog.askdirectory(title="Select video folder")
+        p = filedialog.askdirectory(title=t("select_video_folder", self.lang))
         if p:
             self.input_entry.delete(0, "end")
             self.input_entry.insert(0, p)
 
     def _browse_output(self) -> None:
-        p = ctk.filedialog.askdirectory(title="Select output folder")
+        p = filedialog.askdirectory(title=t("select_output_folder", self.lang))
         if p:
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, p)
@@ -178,6 +184,114 @@ class App(ctk.CTk):
         p = self.output_entry.get().strip()
         if p and Path(p).exists():
             os.startfile(p)
+
+    def _check_update_async(self) -> None:
+        """Check for updates in a background thread."""
+        self.update_btn.configure(state="disabled")
+        threading.Thread(target=self._check_update_worker, daemon=True).start()
+
+    def _check_update_worker(self) -> None:
+        from vid2dataset.updater import (
+            fetch_latest_release,
+            is_newer,
+            is_running_as_exe,
+        )
+
+        try:
+            release = fetch_latest_release()
+        except Exception as exc:
+            err = str(exc)
+            self.after(0, lambda: messagebox.showerror(
+                t("error", self.lang), f"{t('update_check_failed', self.lang)}: {err}"
+            ))
+            self.after(0, lambda: self.update_btn.configure(state="normal"))
+            return
+
+        if release is None:
+            self.after(0, lambda: messagebox.showerror(
+                t("error", self.lang), t("update_check_failed", self.lang)
+            ))
+            self.after(0, lambda: self.update_btn.configure(state="normal"))
+            return
+
+        if not is_newer(release.version):
+            self.after(0, lambda: messagebox.showinfo(
+                "vid2dataset", t("update_latest", self.lang)
+            ))
+            self.after(0, lambda: self.update_btn.configure(state="normal"))
+            return
+
+        # Newer version available
+        msg = t("update_available", self.lang, version=release.version)
+        if release.notes:
+            msg += "\n\n" + release.notes[:500]
+
+        if is_running_as_exe():
+            # Offer one-click install
+            if messagebox.askyesno("vid2dataset", msg + "\n\nDownload and install now?"):
+                self._do_update(release)
+            else:
+                self.after(0, lambda: self.update_btn.configure(state="normal"))
+        else:
+            # Dev mode: just inform the user
+            messagebox.showinfo(
+                "vid2dataset",
+                msg + "\n\nRun `git pull` or download the new release from GitHub.",
+            )
+            self.after(0, lambda: self.update_btn.configure(state="normal"))
+
+    def _do_update(self, release) -> None:
+        """Download new exe and stage replacement."""
+        from vid2dataset.updater import download_exe, install_update
+
+        if not release.exe_url:
+            self.after(0, lambda: messagebox.showerror(
+                t("error", self.lang), "No .exe asset in release."
+            ))
+            self.after(0, lambda: self.update_btn.configure(state="normal"))
+            return
+
+        self.after(0, lambda: self.status_var.set(t("update_downloading", self.lang)))
+        self.after(0, lambda: self.progress.start())
+
+        import sys
+        target = Path(sys.executable).parent / "vid2dataset_new.exe"
+
+        def progress_cb(done: int, total: int) -> None:
+            if total > 0:
+                pct = done * 100 // total
+                self.after(0, lambda p=pct: self.status_var.set(
+                    f"{t('update_downloading', self.lang)} {p}%"
+                ))
+
+        try:
+            download_exe(release.exe_url, target, progress_cb=progress_cb)
+        except Exception as exc:
+            err = str(exc)
+            self.after(0, lambda: self.progress.stop())
+            self.after(0, lambda: messagebox.showerror(
+                t("error", self.lang), f"Download failed: {err}"
+            ))
+            self.after(0, lambda: self.update_btn.configure(state="normal"))
+            return
+
+        self.after(0, lambda: self.progress.stop())
+        self.after(0, lambda: self.status_var.set(t("update_ready", self.lang)))
+        self.after(0, lambda: messagebox.showinfo(
+            "vid2dataset",
+            t("update_ready", self.lang) + "\n\nThe app will now restart.",
+        ))
+
+        try:
+            install_update(target)
+            # Exit the app — the .bat will swap and restart
+            self.after(500, self.destroy)
+        except Exception as exc:
+            err = str(exc)
+            self.after(0, lambda: messagebox.showerror(
+                t("error", self.lang), f"Install failed: {err}"
+            ))
+            self.after(0, lambda: self.update_btn.configure(state="normal"))
 
     def _toggle_lang(self) -> None:
         self.lang = "zh" if self.lang == "en" else "en"
@@ -196,6 +310,11 @@ class App(ctk.CTk):
         self.chk_auto.configure(text=t("auto_quality", self.lang))
         self.chk_kf.configure(text=t("keyframe", self.lang))
         self.chk_subj.configure(text=t("subject_size", self.lang))
+        # Refresh all parameter labels
+        for key, lbl in self._param_labels.items():
+            lbl.configure(text=t(key, self.lang))
+        if hasattr(self, "update_btn"):
+            self.update_btn.configure(text=t("check_update", self.lang))
         if not self._running:
             self.status_var.set(t("ready", self.lang))
 
@@ -222,10 +341,13 @@ class App(ctk.CTk):
         inp = self.input_entry.get().strip()
         out = self.output_entry.get().strip() or "output"
         if not inp:
-            ctk.CTkInputDialog(title=t("error", self.lang), text=t("no_input", self.lang))
+            messagebox.showerror(t("error", self.lang), t("no_input", self.lang))
             return
         if not Path(inp).exists():
-            ctk.CTkInputDialog(title=t("error", self.lang), text=f"{t('not_found', self.lang)}\n{inp}")
+            messagebox.showerror(
+                t("error", self.lang),
+                f"{t('not_found', self.lang)}\n{inp}",
+            )
             return
         # Save paths
         self.prefs.update({"input": inp, "output": out, "preset": self.preset_var.get()})

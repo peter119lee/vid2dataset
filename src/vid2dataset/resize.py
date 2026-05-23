@@ -58,6 +58,10 @@ def generate_buckets(
     """
     if resolution % step != 0:
         raise ValueError(f"resolution {resolution} not a multiple of step {step}")
+    if min_bucket % step != 0:
+        raise ValueError(f"min_bucket {min_bucket} not a multiple of step {step}")
+    if max_bucket % step != 0:
+        raise ValueError(f"max_bucket {max_bucket} not a multiple of step {step}")
     if min_bucket > max_bucket:
         raise ValueError("min_bucket > max_bucket")
 
@@ -117,6 +121,8 @@ def cover_resize_and_crop(
         # then center-crop to (bw, bh)
     """
     h, w = image_bgr.shape[:2]
+    if h <= 0 or w <= 0:
+        raise ValueError(f"invalid image dimensions: {w}x{h}")
     bw, bh = bucket.width, bucket.height
     ar_img = w / h
     ar_bucket = bw / bh

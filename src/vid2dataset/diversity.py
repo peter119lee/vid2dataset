@@ -57,6 +57,9 @@ class DiversityFilter:
         """Register a frame as accepted (store a small thumbnail for future comparisons)."""
         thumb = cv2.resize(frame_bgr, (128, 128), interpolation=cv2.INTER_AREA)
         self._accepted.append(thumb)
+        # Bound the list to max_compare entries to prevent memory leak on long videos.
+        if len(self._accepted) > self.max_compare:
+            self._accepted = self._accepted[-self.max_compare:]
 
     def reset(self) -> None:
         """Clear for a new scene."""

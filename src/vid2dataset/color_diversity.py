@@ -66,6 +66,8 @@ class ColorDiversityFilter:
     def accept(self, frame_bgr: np.ndarray) -> None:
         fp = compute_color_fingerprint(frame_bgr)
         self._fingerprints.append(fp)
+        if len(self._fingerprints) > self.max_compare:
+            self._fingerprints = self._fingerprints[-self.max_compare:]
 
     def reset(self) -> None:
         self._fingerprints.clear()

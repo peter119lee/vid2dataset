@@ -40,14 +40,15 @@ def compute_completeness_score(frame_bgr: np.ndarray, *, border_ratio: float = 0
 
     center_mask = 1 - border_mask
 
-    border_pixels = border_mask.sum()
-    center_pixels = center_mask.sum()
+    border_pixels = int(border_mask.sum())
+    center_pixels = int(center_mask.sum())
 
     if border_pixels == 0 or center_pixels == 0:
         return 1.0
 
-    border_edge_density = (edges * border_mask).sum() / (border_pixels * 255)
-    center_edge_density = (edges * center_mask).sum() / (center_pixels * 255)
+    # Cast to int64 to prevent uint8 overflow on large images.
+    border_edge_density = int((edges.astype(np.int64) * border_mask).sum()) / (border_pixels * 255)
+    center_edge_density = int((edges.astype(np.int64) * center_mask).sum()) / (center_pixels * 255)
 
     # If border has more edge activity relative to center, subject is cut off
     if center_edge_density < 0.001:
