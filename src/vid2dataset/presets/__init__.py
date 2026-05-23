@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from importlib import resources
 from pathlib import Path
 
 if sys.version_info >= (3, 11):
@@ -15,8 +14,32 @@ PRESETS_PACKAGE = "vid2dataset.presets"
 
 
 def _preset_dir() -> Path:
-    """Return the on-disk directory containing preset TOMLs."""
-    return Path(resources.files(PRESETS_PACKAGE))  # type: ignore[arg-type]
+    """Return the on-disk directory containing preset TOMLs.
+
+    Handles normal installs, editable installs, and PyInstaller bundles.
+    """
+    # PyInstaller: check sys._MEIPASS first
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = Path(meipass) / "vid2dataset" / "presets"
+        if p.exists() and any(p.glob("*.toml")):
+            return p
+
+    # importlib.resources (normal install)
+    try:
+        from importlib import resources
+        p = Path(str(resources.files(PRESETS_PACKAGE)))
+        if p.exists() and any(p.glob("*.toml")):
+            return p
+    except Exception:
+        pass
+
+    # Fallback: relative to this file
+    p = Path(__file__).parent
+    if any(p.glob("*.toml")):
+        return p
+
+    raise FileNotFoundError("Cannot locate preset TOML files")
 
 
 def list_presets() -> list[tuple[str, str]]:

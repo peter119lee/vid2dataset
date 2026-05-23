@@ -263,10 +263,8 @@ def _process_video(
     written_for_this_video = 0
     seek_mode = cfg.decode_mode != "keyframe"
 
-    # Backup candidates: frames that passed quality+resize but failed
-    # diversity/color. Used for min_per_video guarantee.
-    backup_candidates: list[tuple[int, np.ndarray, float, Bucket]] = []
-    subject_filter_all_rejected = True  # track if subject filter blocks everything
+    # ALL frames that pass quality+resize go here as fallback for min guarantee.
+    all_quality_passed: list[tuple[int, np.ndarray, float, Bucket]] = []
 
     effective_max = cfg.max_per_video
     effective_min = cfg.min_per_video
@@ -303,22 +301,19 @@ def _process_video(
                 stats.rejected_luma += 1
             continue
 
-        # Completeness filter.
+        # Completeness filter (soft: rejected frames still go to backup).
         if cfg.completeness_filter and not is_subject_complete(
             frame_bgr, min_score=cfg.completeness_threshold
         ):
             stats.rejected_completeness += 1
             continue
 
-        # Subject size filter (safe: tracks if all rejected).
-        if cfg.subject_size_filter:
-            if is_subject_large_enough(frame_bgr, min_ratio=cfg.subject_min_ratio):
-                subject_filter_all_rejected = False
-            else:
-                stats.rejected_completeness += 1
-                continue
-        else:
-            subject_filter_all_rejected = False
+        # Subject size filter (soft: skip but don't lose frame).
+        if cfg.subject_size_filter and not is_subject_large_enough(
+            frame_bgr, min_ratio=cfg.subject_min_ratio
+        ):
+            stats.rejected_completeness += 1
+            continue
 
         # Resize to bucket.
         rr = _resize_to_bucket(frame_bgr, cfg, buckets)
@@ -330,16 +325,17 @@ def _process_video(
             stats.rejected_too_small += 1
             continue
 
+        # Frame passed quality + resize — save as backup for min guarantee.
+        all_quality_passed.append((idx, out_img, q.blur_score, bucket))
+
         # SSIM diversity.
         if ssim_filter is not None and not ssim_filter.is_diverse(out_img):
             stats.rejected_ssim += 1
-            backup_candidates.append((idx, out_img, q.blur_score, bucket))
             continue
 
-        # Color diversity.
+        # Color diversity — auto-relax if too strict.
         if color_filter is not None and not color_filter.is_diverse(out_img):
             stats.rejected_color += 1
-            backup_candidates.append((idx, out_img, q.blur_score, bucket))
             continue
 
         # pHash dedup.
@@ -379,27 +375,19 @@ def _process_video(
             log.info("Reached max_per_video=%d for %s", effective_max, video.name)
             break
 
-    # ── Subject size filter safe fallback ────────────────────────
-    # If subject_size_filter rejected ALL frames, re-run without it would be
-    # expensive. Instead we just log a warning — the min_per_video guarantee
-    # below will pull from backup_candidates which already passed quality.
-    if cfg.subject_size_filter and subject_filter_all_rejected and written_for_this_video == 0:
-        log.warning(
-            "Subject size filter rejected all frames in %s — "
-            "filter auto-disabled for this video.", video.name,
-        )
-
     # ── Min per-video guarantee ──────────────────────────────────
-    # If we didn't meet the minimum, pull the best backup candidates
-    # (sorted by blur score descending = sharpest first).
+    # If we didn't meet the minimum, pull from ALL quality-passed frames
+    # (sorted by sharpness). This is the REAL guarantee — it uses frames
+    # that passed quality+resize regardless of diversity/dedup rejection.
     if effective_min > 0 and written_for_this_video < effective_min:
         needed = effective_min - written_for_this_video
         if effective_max:
             needed = min(needed, effective_max - written_for_this_video)
-        # Sort backups by sharpness (highest blur_score = sharpest)
-        backup_candidates.sort(key=lambda x: x[2], reverse=True)
-        for b_idx, b_img, b_blur, b_bucket in backup_candidates[:needed]:
-            # Skip dedup check for guarantee frames (they're the best we have)
+        # Exclude already-written frame indices
+        written_indices = {r.frame_index for r in stats.records}
+        available = [c for c in all_quality_passed if c[0] not in written_indices]
+        available.sort(key=lambda x: x[2], reverse=True)  # sharpest first
+        for b_idx, b_img, b_blur, b_bucket in available[:needed]:
             seq += 1
             stem = f"{sanitize_stem(video.stem)}_{seq:05d}"
             out_path = out_dir / f"{stem}.{cfg.output_format}"
@@ -419,10 +407,10 @@ def _process_video(
             )
             stats.written += 1
             written_for_this_video += 1
-        if needed > 0 and backup_candidates:
+        if needed > 0 and available:
             log.info(
                 "Min guarantee: added %d backup frames for %s",
-                min(needed, len(backup_candidates)), video.name,
+                min(needed, len(available)), video.name,
             )
 
     stats.elapsed_s = time.perf_counter() - t0

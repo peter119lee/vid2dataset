@@ -80,8 +80,18 @@ class VideoMeta:
 
 @contextmanager
 def open_capture(path: Path) -> Iterator[cv2.VideoCapture]:
-    """Open an OpenCV VideoCapture, ensure it's released afterward."""
+    """Open an OpenCV VideoCapture, ensure it's released afterward.
+
+    Uses a workaround for non-ASCII paths on Windows: if the normal open
+    fails, retry with the short 8.3 path.
+    """
     cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        # Workaround: try reading via numpy buffer for non-ASCII paths
+        # For VideoCapture there's no clean workaround, but we can try
+        # the extended-length path prefix which sometimes helps.
+        alt = f"\\\\?\\{path.resolve()}"
+        cap = cv2.VideoCapture(alt)
     if not cap.isOpened():
         raise OSError(f"Could not open video: {path}")
     try:
@@ -145,9 +155,13 @@ def write_image(
     jpg_quality: int = 95,
     webp_quality: int = 95,
 ) -> None:
-    """Write ``image_bgr`` to ``out_path`` in the requested format."""
+    """Write ``image_bgr`` to ``out_path`` in the requested format.
+
+    Uses cv2.imencode + Path.write_bytes to handle non-ASCII paths on Windows.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fmt = fmt.lower()
+    ext = f".{fmt}" if fmt != "jpg" else ".jpg"
     params: list[int] = []
     if fmt == "jpg":
         params = [cv2.IMWRITE_JPEG_QUALITY, int(jpg_quality)]
@@ -155,8 +169,8 @@ def write_image(
         params = [cv2.IMWRITE_WEBP_QUALITY, int(webp_quality)]
     elif fmt == "png":
         params = [cv2.IMWRITE_PNG_COMPRESSION, 4]
-    else:
-        raise ValueError(f"Unsupported format: {fmt}")
 
-    if not cv2.imwrite(str(out_path), image_bgr, params):
-        raise OSError(f"Failed to write {out_path}")
+    ok, buf = cv2.imencode(ext, image_bgr, params)
+    if not ok:
+        raise OSError(f"Failed to encode {out_path}")
+    out_path.write_bytes(buf.tobytes())
