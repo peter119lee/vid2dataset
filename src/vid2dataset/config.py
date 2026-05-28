@@ -255,6 +255,13 @@ class ExtractConfig(BaseModel):
     )
 
     # ── Decode mode ──────────────────────────────────────────────────
+    gpu_accel: bool = Field(
+        False,
+        description="Experimental: use GPU video decoding (NVDEC/QSV/etc.) "
+        "if available. Validated against CPU output before use; auto-disabled "
+        "if results diverge. Saves 2-3x decode time on 4K but has cross-platform "
+        "reliability risks.",
+    )
     decode_mode: Literal["accurate", "keyframe"] = Field(
         "accurate",
         description="'accurate' = frame-exact seeking (slow but precise); "

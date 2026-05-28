@@ -420,6 +420,7 @@ class App(ctk.CTk):
                 "auto_quality": self.auto_quality_var.get(),
                 "decode_mode": "keyframe" if self.keyframe_var.get() else "accurate",
                 "subject_size_filter": self.subject_var.get(),
+                "gpu_accel": self.gpu_var.get(),
             })
             for key, entry in self._params.items():
                 val = entry.get().strip()

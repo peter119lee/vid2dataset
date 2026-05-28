@@ -53,7 +53,7 @@ from vid2dataset.io_utils import (
     sanitize_stem,
     write_image,
 )
-from vid2dataset.keyframe_decoder import extract_keyframes, has_ffmpeg
+from vid2dataset.keyframe_decoder import auto_select_hwaccel, extract_keyframes, has_ffmpeg
 from vid2dataset.quality import evaluate_frame
 from vid2dataset.resize import (
     Bucket,
@@ -192,6 +192,7 @@ def _process_video(
     seq_offset: int,
     progress: ProgressCallback | None,
     cancel_event: threading.Event | None = None,
+    hwaccel: str | None = None,
 ) -> VideoStats:
     """Extract frames from a single video."""
     t0 = time.perf_counter()
@@ -292,7 +293,7 @@ def _process_video(
         # ffmpeg path: stream all keyframes, ignore indices, treat ts*fps as idx
         def _frame_source():
             try:
-                for ts, fr in extract_keyframes(video, max_count=200):
+                for ts, fr in extract_keyframes(video, max_count=200, hwaccel=hwaccel):
                     yield int(ts * (meta.fps or 30)), fr
             except (ImportError, OSError) as e:
                 log.warning("ffmpeg path failed (%s); falling back to OpenCV", e)
@@ -486,6 +487,19 @@ def run_pipeline(
         raise RuntimeError(f"No videos found under {cfg.input}")
 
     cfg.output.mkdir(parents=True, exist_ok=True)
+
+    # GPU acceleration probe: validate once before processing.
+    selected_hwaccel: str | None = None
+    if cfg.gpu_accel and has_ffmpeg():
+        sample_videos = discover_videos(cfg.input)
+        if sample_videos:
+            log.info("Probing GPU acceleration on sample video...")
+            selected_hwaccel = auto_select_hwaccel(sample_videos[0])
+            if selected_hwaccel:
+                log.info("GPU acceleration: %s", selected_hwaccel)
+            else:
+                log.warning("GPU acceleration requested but no working hwaccel found; using CPU")
+
     buckets = generate_buckets(
         resolution=cfg.resolution,
         min_bucket=cfg.min_bucket,
@@ -532,6 +546,7 @@ def run_pipeline(
                 video, cfg=cfg, buckets=buckets,
                 dedup_index=dedup_index, dedup_lock=dedup_lock,
                 seq_offset=seq_off, progress=progress, cancel_event=cancel_event,
+                hwaccel=selected_hwaccel,
             )
         except (cv2.error, OSError, ValueError) as e:
             log.error("Failed to process %s: %s", video.name, e)
