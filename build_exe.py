@@ -62,6 +62,11 @@ def main() -> None:
         "--windowed",
         "--clean",
         "--noconfirm",
+        # Exclude torch from .exe to keep size small. Users wanting GPU pipeline
+        # should "pip install vid2dataset[gpu]" \u2014 see release notes.
+        "--exclude-module", "torch",
+        "--exclude-module", "torchvision",
+        "--exclude-module", "torchaudio",
         "--name", "vid2dataset",
         "--add-data", f"{HERE / 'src' / 'vid2dataset' / 'presets'};vid2dataset/presets",
         "--collect-all", "customtkinter",

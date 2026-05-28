@@ -44,6 +44,7 @@ from vid2dataset.crop import detect_letterbox
 from vid2dataset.dedup import DedupIndex, hash_image
 from vid2dataset.diversity import DiversityFilter
 from vid2dataset.gallery import generate_contact_sheet, generate_html_gallery
+from vid2dataset.gpu_filters import BatchColorFilter, BatchSSIMFilter, is_gpu_pipeline_available
 from vid2dataset.hardware import auto_detect_workers
 from vid2dataset.io_utils import (
     VideoMeta,
@@ -266,10 +267,21 @@ def _process_video(
     )
 
     # ── Diversity filters (per-video state) ──────────────────────
-    ssim_filter = DiversityFilter(ssim_threshold=cfg.ssim_threshold) if cfg.ssim_filter else None
-    color_filter = (
-        ColorDiversityFilter(min_distance=cfg.color_distance) if cfg.color_diversity else None
-    )
+    use_gpu_filters = bool(cfg.gpu_accel) and is_gpu_pipeline_available()
+    if cfg.ssim_filter:
+        ssim_filter = (
+            BatchSSIMFilter(ssim_threshold=cfg.ssim_threshold)
+            if use_gpu_filters else
+            DiversityFilter(ssim_threshold=cfg.ssim_threshold)
+        )
+    else:
+        ssim_filter = None
+    # Color filter: CPU is faster than GPU for our histogram-per-frame pattern
+    # (GPU transfer overhead dominates for small ops). GPU SSIM still wins.
+    if cfg.color_diversity:
+        color_filter = ColorDiversityFilter(min_distance=cfg.color_distance)
+    else:
+        color_filter = None
 
     # ── Decode + filter + write ─────────────────────────────────
     seq = seq_offset
@@ -489,6 +501,11 @@ def run_pipeline(
     cfg.output.mkdir(parents=True, exist_ok=True)
 
     # GPU acceleration probe: validate once before processing.
+    # Log GPU pipeline state
+    if cfg.gpu_accel:
+        from vid2dataset.gpu_filters import device_summary
+        log.info("%s", device_summary())
+
     selected_hwaccel: str | None = None
     if cfg.gpu_accel and has_ffmpeg():
         sample_videos = discover_videos(cfg.input)

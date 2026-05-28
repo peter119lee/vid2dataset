@@ -2,5 +2,5 @@
 
 from vid2dataset.config import ExtractConfig
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 __all__ = ["ExtractConfig", "__version__"]
