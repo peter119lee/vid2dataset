@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from vid2dataset.gpu_filters import (
     BatchColorFilter,
     BatchSSIMFilter,
     best_device,
     device_summary,
-    is_gpu_pipeline_available,
     is_torch_available,
 )
 
