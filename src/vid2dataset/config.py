@@ -255,6 +255,12 @@ class ExtractConfig(BaseModel):
     )
 
     # ── Decode mode ──────────────────────────────────────────────────
+    crop_watermark: bool = Field(
+        False,
+        description="If True, expand the bucket crop to remove peripheral "
+        "watermarks detected by detect_watermark. Default False (warn-only). "
+        "Center watermarks are never cropped (would slice the subject).",
+    )
     detect_watermark: bool = Field(
         True,
         description="Scan each video for static text/logo overlays (URLs, artist "

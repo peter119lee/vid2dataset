@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+        # Note: gpu_filters tests degrade gracefully when torch is missing,
+        # so we don't install [gpu] extras in CI.
+
+      - name: Lint with ruff
+        run: ruff check src/ tests/
+
+      - name: Run tests
+        run: pytest -q
+
+  lint-only-linux:
+    # Quick cross-platform check that imports work on Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Smoke import check
+        run: |
+          python -c "from vid2dataset import extractor, config, watermark, report, gpu_filters, gallery"
+      - name: Lint
+        run: ruff check src/ tests/

@@ -66,7 +66,7 @@ from vid2dataset.resize import (
     select_bucket,
 )
 from vid2dataset.scene import detect_scenes, sample_indices_for_scene
-from vid2dataset.watermark import WatermarkRegion, detect_watermarks
+from vid2dataset.watermark import WatermarkRegion, detect_watermarks, expand_crop_for_watermarks
 
 log = logging.getLogger(__name__)
 
@@ -346,14 +346,23 @@ def _process_video(
         if progress and (n % 4 == 0):
             progress("decode", n, len(indices) if indices else 0)
 
-        # Letterbox crop first.
-        if cfg.detect_letterbox:
+        # Letterbox crop first, optionally expanded to remove watermarks.
+        if cfg.detect_letterbox or (cfg.crop_watermark and watermark_regions):
             rect = detect_letterbox(
                 frame_bgr,
                 threshold=cfg.letterbox_threshold,
                 min_ratio=cfg.letterbox_min_ratio,
+            ) if cfg.detect_letterbox else None
+            base_x, base_y, base_w, base_h = (
+                (rect.x, rect.y, rect.w, rect.h)
+                if rect is not None
+                else (0, 0, frame_bgr.shape[1], frame_bgr.shape[0])
             )
-            frame_bgr = rect.apply(frame_bgr)
+            if cfg.crop_watermark and watermark_regions:
+                base_x, base_y, base_w, base_h = expand_crop_for_watermarks(
+                    base_x, base_y, base_w, base_h, watermark_regions
+                )
+            frame_bgr = frame_bgr[base_y : base_y + base_h, base_x : base_x + base_w]
 
         # Quality gate.
         q = evaluate_frame(
@@ -667,8 +676,19 @@ def run_pipeline(
         cs_path = str(cs) if cs else None
 
     if cfg.html_gallery and all_image_paths:
+        # Build metadata: per-output-path dict of blur/bucket/frame info
+        gallery_meta: dict[Path, dict] = {}
+        for vs in all_stats:
+            for r in vs.records:
+                gallery_meta[Path(r.out_path)] = {
+                    "blur": r.blur,
+                    "bucket": list(r.bucket),
+                    "frame_index": r.frame_index,
+                    "video": vs.video,
+                }
         hg = generate_html_gallery(
-            all_image_paths, cfg.output / "_gallery.html"
+            all_image_paths, cfg.output / "_gallery.html",
+            metadata=gallery_meta,
         )
         html_path = str(hg) if hg else None
 

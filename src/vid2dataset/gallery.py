@@ -70,6 +70,7 @@ def generate_html_gallery(
     output_path: Path,
     *,
     title: str = "vid2dataset output",
+    metadata: dict[Path, dict] | None = None,
 ) -> Path | None:
     """Generate a self-contained HTML gallery with lazy-loaded thumbnails.
 
@@ -81,15 +82,32 @@ def generate_html_gallery(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     base_dir = output_path.parent
 
+    metadata = metadata or {}
     rows: list[str] = []
     for p in image_paths:
         try:
             rel = p.relative_to(base_dir)
         except ValueError:
             rel = p
+        meta = metadata.get(p, {})
+        meta_lines = []
+        if "blur" in meta:
+            meta_lines.append(f"blur {meta['blur']:.1f}")
+        if "bucket" in meta:
+            b = meta['bucket']
+            meta_lines.append(f"bucket {b[0]}x{b[1]}")
+        if "frame_index" in meta:
+            meta_lines.append(f"frame #{meta['frame_index']}")
+        if "video" in meta:
+            meta_lines.append(f"src: {Path(meta['video']).name}")
+        meta_html = (
+            '<div class="meta">' + '<br>'.join(html.escape(s) for s in meta_lines) + '</div>'
+            if meta_lines else ''
+        )
         rows.append(
             f'<div class="card"><img loading="lazy" src="{html.escape(rel.as_posix())}" '
-            f'alt="{html.escape(p.stem)}"><span>{html.escape(p.stem)}</span></div>'
+            f'alt="{html.escape(p.stem)}">'
+            f'<span>{html.escape(p.stem)}</span>{meta_html}</div>'
         )
 
     html_content = f"""<!DOCTYPE html>
@@ -106,6 +124,12 @@ h1 {{ font-size: 1.4rem; margin-bottom: 12px; }}
 .card img {{ width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }}
 .card span {{ display: block; padding: 4px 8px; font-size: 0.7rem; color: #aaa;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.card {{ position: relative; }}
+.card .meta {{ position: absolute; top: 0; left: 0; right: 0; bottom: 28px;
+                background: rgba(0,0,0,0.85); color: #e2e8f0; padding: 12px;
+                font-size: 0.75rem; line-height: 1.5; opacity: 0;
+                transition: opacity 0.15s ease-in-out; pointer-events: none; }}
+.card:hover .meta {{ opacity: 1; }}
 </style>
 </head>
 <body>

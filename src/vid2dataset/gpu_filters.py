@@ -174,6 +174,8 @@ class BatchSSIMFilter:
         return all(self._ssim_cpu_pair(gray, r) <= self.threshold for r in refs)
 
     def accept(self, frame_bgr: np.ndarray) -> None:
+        if self._validated is None:
+            self._validate_once(frame_bgr)
         gray = self._to_gray128(frame_bgr).astype(np.float32)
         if _HAS_TORCH and self._validated:
             new_thumb = torch.from_numpy(gray).unsqueeze(0).unsqueeze(0).to(self.device)
@@ -303,6 +305,9 @@ class BatchColorFilter:
         return all(self._chi2_cpu(fp, r) >= self.min_distance for r in refs)
 
     def accept(self, frame_bgr: np.ndarray) -> None:
+        # Run validation on first call so storage type is decided up front.
+        if self._validated is None:
+            self._validate_once(frame_bgr)
         if _HAS_TORCH and self._validated:
             fp = self._hist_gpu(self._hsv(frame_bgr)).unsqueeze(0)
             if self._fps is None:

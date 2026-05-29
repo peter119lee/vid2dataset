@@ -174,6 +174,14 @@ class App(ctk.CTk):
         self.chk_wm = ctk.CTkCheckBox(chk, text=t("watermark", self.lang), variable=self.watermark_var)
         self.chk_wm.pack(side="left", padx=(0, 14))
         Tooltip(self.chk_wm, lambda: t("tip_watermark", self.lang), wraplength=380)
+        self.crop_wm_var = ctk.BooleanVar(value=False)
+        self.chk_crop_wm = ctk.CTkCheckBox(chk, text=t("crop_watermark", self.lang), variable=self.crop_wm_var)
+        self.chk_crop_wm.pack(side="left", padx=(0, 14))
+        Tooltip(self.chk_crop_wm, lambda: t("tip_crop_watermark", self.lang), wraplength=380)
+        self.flatten_var = ctk.BooleanVar(value=False)
+        self.chk_flatten = ctk.CTkCheckBox(chk, text=t("flatten_output", self.lang), variable=self.flatten_var)
+        self.chk_flatten.pack(side="left", padx=(0, 14))
+        Tooltip(self.chk_flatten, lambda: t("tip_flatten", self.lang), wraplength=380)
 
         # Run
         run_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -229,8 +237,20 @@ class App(ctk.CTk):
 
     def _open_output(self) -> None:
         p = self.output_entry.get().strip()
-        if p and Path(p).exists():
-            os.startfile(p)
+        if not p or not Path(p).exists():
+            return
+        import subprocess
+        import sys
+        try:
+            if sys.platform == "win32":
+                os.startfile(p)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", p])
+            else:
+                subprocess.Popen(["xdg-open", p])
+        except Exception as e:
+            log = __import__("logging").getLogger(__name__)
+            log.warning("open output folder failed: %s", e)
 
     def _check_update_async(self) -> None:
         """Check for updates in a background thread."""
@@ -359,6 +379,8 @@ class App(ctk.CTk):
         self.chk_kf.configure(text=t("keyframe", self.lang))
         self.chk_subj.configure(text=t("subject_size", self.lang))
         self.chk_wm.configure(text=t("watermark", self.lang))
+        self.chk_crop_wm.configure(text=t("crop_watermark", self.lang))
+        self.chk_flatten.configure(text=t("flatten_output", self.lang))
         # Refresh all parameter labels
         for key, lbl in self._param_labels.items():
             lbl.configure(text=t(key, self.lang))
@@ -378,6 +400,8 @@ class App(ctk.CTk):
         self.keyframe_var.set(cfg.get("decode_mode", "accurate") == "keyframe")
         self.subject_var.set(bool(cfg.get("subject_size_filter", False)))
         self.watermark_var.set(bool(cfg.get("detect_watermark", True)))
+        self.crop_wm_var.set(bool(cfg.get("crop_watermark", False)))
+        self.flatten_var.set(bool(cfg.get("flatten_output", False)))
 
     def _log(self, msg: str) -> None:
         self.log_box.configure(state="normal")
@@ -427,6 +451,8 @@ class App(ctk.CTk):
                 "decode_mode": "keyframe" if self.keyframe_var.get() else "accurate",
                 "subject_size_filter": self.subject_var.get(),
                 "detect_watermark": self.watermark_var.get(),
+                "crop_watermark": self.crop_wm_var.get(),
+                "flatten_output": self.flatten_var.get(),
                 "gpu_accel": self.gpu_var.get(),
             })
             for key, entry in self._params.items():
