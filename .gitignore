@@ -61,3 +61,8 @@ out/
 *.log
 .dedup_index/
 .vid2dataset.json
+
+# Local test outputs
+v0?_test/
+smoke_out/
+test_*/
