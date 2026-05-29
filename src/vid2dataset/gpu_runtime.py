@@ -21,7 +21,9 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
+import time
 import urllib.request
 import zipfile
 from collections.abc import Callable
@@ -83,18 +85,277 @@ def _query_pypi_url(package: str, version: str) -> str:
     raise RuntimeError(f"No suitable wheel for {package}=={version} (Python {pyt})")
 
 
-def _wheel_urls() -> dict[str, str]:
+_TORCH_VERSIONS = {
+    "cu118": "2.5.1",
+    "cu121": "2.5.1",
+    "cu124": "2.5.1",
+}
+
+
+def _wheel_urls(cuda_tag: str = "cu121") -> dict[str, str]:
+    """Build the wheel URL map for the given CUDA tag."""
     pyt = _py_tag()
+    torch_ver = _TORCH_VERSIONS.get(cuda_tag, "2.5.1")
     urls: dict[str, str] = {
         "torch": (
-            f"https://download.pytorch.org/whl/cu121/"
-            f"torch-2.5.1+cu121-{pyt}-{pyt}-win_amd64.whl"
+            f"https://download.pytorch.org/whl/{cuda_tag}/"
+            f"torch-{torch_ver}+{cuda_tag}-{pyt}-{pyt}-win_amd64.whl"
         ),
     }
     for pkg, ver in _PYPI_DEPS:
         urls[pkg] = _query_pypi_url(pkg, ver)
     return urls
 
+
+
+
+# ── Hardware / OS detection ────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class HardwareProfile:
+    vendor: str       # NVIDIA / AMD / Intel / Apple / Unknown
+    gpu_name: str     # e.g. "NVIDIA GeForce RTX 3090"
+    arch: str         # ampere / ada / blackwell / hopper / turing / etc / "" if unknown
+    compute_cap: float  # e.g. 8.6 (NVIDIA only), 0.0 if unknown
+    os_name: str      # windows / linux / macos
+    os_arch: str      # x86_64 / arm64
+
+    def __str__(self) -> str:
+        parts = [self.os_name, self.os_arch]
+        if self.gpu_name:
+            parts.append(self.gpu_name)
+        if self.arch:
+            parts.append(f"({self.arch})")
+        return " ".join(parts)
+
+
+def detect_os() -> tuple[str, str]:
+    import platform
+    plat = platform.system().lower()
+    if plat == "darwin":
+        plat = "macos"
+    arch = platform.machine().lower()
+    if arch in ("amd64", "x64"):
+        arch = "x86_64"
+    return plat, arch
+
+
+def _run_cmd(args: list[str], timeout: float = 5.0) -> str:
+    """Run a command silently and return stdout. Empty string on failure."""
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout,
+            errors="ignore",
+            creationflags=0x08000000 if sys.platform == "win32" else 0,
+        )
+        return result.stdout
+    except Exception:
+        return ""
+
+
+def _nvidia_smi() -> dict:
+    """Query nvidia-smi for GPU name + compute capability + memory."""
+    out = _run_cmd([
+        "nvidia-smi",
+        "--query-gpu=name,compute_cap,memory.total",
+        "--format=csv,noheader,nounits",
+    ])
+    if not out.strip():
+        return {}
+    line = out.strip().splitlines()[0]
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) < 2:
+        return {}
+    name = parts[0]
+    try:
+        cap = float(parts[1])
+    except ValueError:
+        cap = 0.0
+    return {"name": name, "compute_cap": cap}
+
+
+def _wmic_gpus() -> list[str]:
+    """Windows fallback: list all GPU device names via wmic."""
+    out = _run_cmd(["wmic", "path", "win32_VideoController", "get", "name"])
+    return [line.strip() for line in out.splitlines()[1:] if line.strip()]
+
+
+def _classify_nvidia(name: str, compute_cap: float) -> str:
+    """Map GPU name / compute capability to a CUDA architecture nickname."""
+    n = name.lower()
+    # Blackwell consumer: RTX 50xx (CC 10.0 expected)
+    if "rtx 50" in n or compute_cap >= 10.0:
+        return "blackwell"
+    # Hopper: H100, H200 (CC 9.0)
+    if "h100" in n or "h200" in n or compute_cap == 9.0:
+        return "hopper"
+    # Ada Lovelace: RTX 40xx (CC 8.9)
+    if "rtx 40" in n or (compute_cap and 8.85 <= compute_cap < 9.0):
+        return "ada"
+    # Ampere: RTX 30xx, A100 (CC 8.0-8.6)
+    if "rtx 30" in n or "a100" in n or (compute_cap and 8.0 <= compute_cap < 8.85):
+        return "ampere"
+    # Turing: RTX 20xx, GTX 16xx (CC 7.5)
+    if "rtx 20" in n or "gtx 16" in n or compute_cap == 7.5:
+        return "turing"
+    return ""
+
+
+def detect_gpu() -> HardwareProfile:
+    """Inspect the running machine for GPU + OS info."""
+    os_name, os_arch = detect_os()
+
+    # Try NVIDIA first
+    nv = _nvidia_smi()
+    if nv:
+        arch = _classify_nvidia(nv["name"], nv["compute_cap"])
+        return HardwareProfile(
+            vendor="NVIDIA",
+            gpu_name=nv["name"],
+            arch=arch,
+            compute_cap=nv["compute_cap"],
+            os_name=os_name,
+            os_arch=os_arch,
+        )
+
+    # Apple Silicon: arm64 macOS
+    if os_name == "macos" and os_arch == "arm64":
+        return HardwareProfile(
+            vendor="Apple",
+            gpu_name="Apple Silicon (MPS)",
+            arch="apple",
+            compute_cap=0.0,
+            os_name=os_name,
+            os_arch=os_arch,
+        )
+
+    # Windows fallback: enumerate via wmic
+    if os_name == "windows":
+        gpus = _wmic_gpus()
+        for gpu in gpus:
+            g = gpu.lower()
+            if "amd" in g or "radeon" in g:
+                return HardwareProfile(
+                    vendor="AMD", gpu_name=gpu, arch="rdna", compute_cap=0.0,
+                    os_name=os_name, os_arch=os_arch,
+                )
+            if "intel" in g and ("arc" in g or "iris" in g or "uhd" in g):
+                return HardwareProfile(
+                    vendor="Intel", gpu_name=gpu, arch="xe", compute_cap=0.0,
+                    os_name=os_name, os_arch=os_arch,
+                )
+
+    # Linux fallback: try lspci
+    if os_name == "linux":
+        out = _run_cmd(["lspci"])
+        for line in out.splitlines():
+            ll = line.lower()
+            if "vga" in ll or "3d controller" in ll or "display" in ll:
+                if "nvidia" in ll:
+                    return HardwareProfile(
+                        vendor="NVIDIA", gpu_name=line.split(":")[-1].strip(),
+                        arch="", compute_cap=0.0,
+                        os_name=os_name, os_arch=os_arch,
+                    )
+                if "amd" in ll or "radeon" in ll:
+                    return HardwareProfile(
+                        vendor="AMD", gpu_name=line.split(":")[-1].strip(),
+                        arch="rdna", compute_cap=0.0,
+                        os_name=os_name, os_arch=os_arch,
+                    )
+
+    return HardwareProfile(
+        vendor="Unknown", gpu_name="", arch="", compute_cap=0.0,
+        os_name=os_name, os_arch=os_arch,
+    )
+
+
+def cuda_version_for_profile(hw: HardwareProfile) -> str | None:
+    """Return the right PyTorch CUDA tag for the detected GPU.
+
+    Returns None if the machine can't run CUDA wheels at all (Apple, AMD, Intel,
+    no NVIDIA, etc.).
+    """
+    if hw.vendor != "NVIDIA":
+        return None
+    if hw.os_name == "macos":
+        return None  # macOS NVIDIA is unsupported by modern torch
+    # Map architecture -> CUDA wheel tag
+    if hw.arch == "blackwell":
+        return "cu124"   # RTX 50xx requires CUDA 12.4+
+    if hw.arch == "hopper":
+        return "cu121"   # H100 fine on cu121
+    if hw.arch in ("ada", "ampere"):
+        return "cu121"   # safe default
+    if hw.arch == "turing":
+        return "cu118"   # older GPUs prefer cu118
+    # Unknown NVIDIA -> safe default
+    return "cu121"
+
+
+def runtime_supported(hw: HardwareProfile) -> tuple[bool, str]:
+    """Can we offer GPU acceleration to this user? Returns (yes/no, reason)."""
+    if hw.vendor == "NVIDIA":
+        if hw.os_name == "macos":
+            return False, "NVIDIA on macOS is not supported by modern PyTorch."
+        return True, ""
+    if hw.vendor == "Apple":
+        return False, "Apple Silicon needs PyTorch+MPS via pip install (auto-download not supported on macOS)."
+    if hw.vendor == "AMD":
+        return False, "AMD GPU detected. PyTorch+ROCm only works on Linux and is not auto-downloaded. Use pip install on Linux."
+    if hw.vendor == "Intel":
+        return False, "Intel GPU detected. PyTorch does not support Intel Arc/iGPU acceleration."
+    return False, "No NVIDIA GPU detected. GPU acceleration requires NVIDIA + CUDA."
+
+
+# ── Mirror speed selection ─────────────────────────────────────────────
+
+
+# Mirrors that host PyTorch CUDA wheels. Order doesn't matter — we race them.
+PYTORCH_MIRRORS = {
+    "official": "https://download.pytorch.org/whl/{cuda}/",
+    "tsinghua": "https://pypi.tuna.tsinghua.edu.cn/simple/torch/",
+    "aliyun":   "https://mirrors.aliyun.com/pypi/simple/torch/",
+    "ustc":     "https://mirrors.ustc.edu.cn/pypi/web/simple/torch/",
+}
+
+
+def pick_fastest_mirror(
+    cuda_tag: str,
+    *,
+    test_kb: int = 256,
+    timeout: float = 5.0,
+) -> tuple[str, str, float]:
+    """Race the mirrors with a small download. Return (name, base_url, seconds).
+
+    Falls back to PyTorch official if everything times out.
+    """
+    candidates = []
+    for name, template in PYTORCH_MIRRORS.items():
+        url = template.format(cuda=cuda_tag)
+        try:
+            t0 = time.perf_counter()
+            req = urllib.request.Request(
+                url, headers={
+                    "User-Agent": "vid2dataset/0.8",
+                    "Range": f"bytes=0-{test_kb * 1024 - 1}",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                resp.read()
+            elapsed = time.perf_counter() - t0
+            candidates.append((name, url, elapsed))
+        except Exception as e:
+            log.debug("Mirror %s failed: %s", name, e)
+            continue
+
+    if not candidates:
+        # All timed out — use official as last resort
+        return ("official", PYTORCH_MIRRORS["official"].format(cuda=cuda_tag), -1.0)
+    candidates.sort(key=lambda x: x[2])
+    log.info("Mirror race: %s", [(n, f"{t:.2f}s") for n, _, t in candidates])
+    return candidates[0]
 
 # ── Public API ─────────────────────────────────────────────────────────
 
@@ -151,14 +412,21 @@ ProgressCallback = Callable[[str, int, int], None]
 """``cb(stage, bytes_done, bytes_total)`` -- bytes_total may be 0 if unknown."""
 
 
-def download_runtime(progress: ProgressCallback | None = None) -> bool:
+def download_runtime(
+    progress: ProgressCallback | None = None,
+    *,
+    cuda_tag: str | None = None,
+) -> bool:
     """Download wheels into the cache and extract them.
 
     Returns True on success. On failure, leaves the cache directory in
     a partial state which the next call can clean up and retry.
     """
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    wheels = _wheel_urls()
+    if cuda_tag is None:
+        hw = detect_gpu()
+        cuda_tag = cuda_version_for_profile(hw) or "cu121"
+    wheels = _wheel_urls(cuda_tag)
 
     for name, url in wheels.items():
         log.info("Downloading %s from %s", name, url)

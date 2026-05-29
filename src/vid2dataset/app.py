@@ -253,7 +253,11 @@ class App(ctk.CTk):
 
         from vid2dataset.gpu_runtime import (
             activate_runtime,
+            cuda_version_for_profile,
+            detect_gpu,
+            pick_fastest_mirror,
             runtime_status,
+            runtime_supported,
             total_download_size_mb,
         )
         status = runtime_status()
@@ -268,10 +272,37 @@ class App(ctk.CTk):
                 messagebox.showerror(t("error", self.lang), t("gpu_activate_failed", self.lang))
             return
 
-        ans = messagebox.askyesno(
-            "vid2dataset",
-            t("gpu_download_prompt", self.lang, mb=total_download_size_mb()),
+        # Hardware-aware download dialog
+        self.status_var.set(t("gpu_detecting", self.lang))
+        self.update_idletasks()
+
+        hw = detect_gpu()
+        ok, reason = runtime_supported(hw)
+        if not ok:
+            self.gpu_var.set(False)
+            messagebox.showerror(
+                t("error", self.lang),
+                t("gpu_unsupported", self.lang, hw=str(hw), reason=reason),
+            )
+            self.status_var.set(t("ready", self.lang))
+            return
+
+        cuda_tag = cuda_version_for_profile(hw) or "cu121"
+
+        self.status_var.set(t("gpu_testing_mirrors", self.lang))
+        self.update_idletasks()
+        mirror_name, mirror_url, mirror_t = pick_fastest_mirror(cuda_tag)
+
+        self._pending_cuda_tag = cuda_tag
+
+        prompt = t(
+            "gpu_download_prompt_v2", self.lang,
+            hw=str(hw), cuda=cuda_tag, mirror=mirror_name,
+            mirror_t=f"{mirror_t:.2f}" if mirror_t > 0 else "?",
+            mb=total_download_size_mb(),
         )
+        self.status_var.set(t("ready", self.lang))
+        ans = messagebox.askyesno("vid2dataset", prompt)
         if not ans:
             self.gpu_var.set(False)
             return
@@ -295,7 +326,7 @@ class App(ctk.CTk):
             ok = False
             err = ""
             try:
-                ok = download_runtime(progress=progress_cb)
+                ok = download_runtime(progress=progress_cb, cuda_tag=getattr(self, "_pending_cuda_tag", None))
             except Exception as exc:
                 err = str(exc)
             self.after(0, lambda: self._on_gpu_download_done(ok, err))
