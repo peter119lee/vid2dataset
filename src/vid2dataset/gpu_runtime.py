@@ -52,6 +52,10 @@ def _py_tag() -> str:
 
 # Spec list: package + version constraint. URLs are looked up on PyPI JSON API.
 _PYPI_DEPS = [
+    # numpy first - torch's C extension binds against a specific ABI.
+    # Without our own numpy, torch falls back to PyInstaller's bundled
+    # numpy (different version) and torch.cuda.is_available() returns False.
+    ("numpy", "2.1.3"),
     ("typing_extensions", "4.12.2"),
     ("filelock", "3.16.1"),
     ("fsspec", "2024.10.0"),
@@ -562,7 +566,11 @@ def activate_runtime() -> tuple[bool, str]:
 
     runtime_str = str(RUNTIME_DIR)
     if runtime_str not in sys.path:
-        sys.path.insert(0, runtime_str)
+        # Append (not insert at 0): PyInstaller-bundled deps win for shared
+        # packages like typing_extensions (newer in bundle than what torch
+        # would pin). torch is excluded from the .exe so it's only in cache,
+        # which means it gets found there regardless of position.
+        sys.path.append(runtime_str)
 
     if sys.platform == "win32":
         cuda_dll_dir = RUNTIME_DIR / "torch" / "lib"
