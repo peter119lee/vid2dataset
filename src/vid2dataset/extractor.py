@@ -56,6 +56,7 @@ from vid2dataset.io_utils import (
 )
 from vid2dataset.keyframe_decoder import auto_select_hwaccel, extract_keyframes, has_ffmpeg
 from vid2dataset.quality import evaluate_frame
+from vid2dataset.report import generate_report
 from vid2dataset.resize import (
     Bucket,
     contain_resize_and_pad,
@@ -65,6 +66,7 @@ from vid2dataset.resize import (
     select_bucket,
 )
 from vid2dataset.scene import detect_scenes, sample_indices_for_scene
+from vid2dataset.watermark import WatermarkRegion, detect_watermarks
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +103,7 @@ class VideoStats:
     rejected_completeness: int = 0
     auto_blur_threshold: float | None = None
     elapsed_s: float = 0.0
+    watermarks: list[dict] = field(default_factory=list)
     records: list[FrameRecord] = field(default_factory=list)
 
 
@@ -207,6 +210,19 @@ def _process_video(
         meta.frame_count, cfg.decode_mode,
     )
 
+    # Watermark scan (warn-only by default, never modifies output bytes).
+    watermark_regions: list[WatermarkRegion] = []
+    if cfg.detect_watermark:
+        try:
+            watermark_regions = detect_watermarks(video)
+            for wm in watermark_regions:
+                log.warning(
+                    "Watermark suspected in %s at %s (%dx%d, conf=%.2f) \u2014 not cropped",
+                    video.name, wm.location, wm.w, wm.h, wm.confidence,
+                )
+        except Exception as e:  # noqa: BLE001
+            log.debug("watermark scan failed for %s: %s", video.name, e)
+
     # ── Auto-quality calibration ─────────────────────────────────
     effective_blur_threshold = cfg.blur_threshold
     auto_threshold = None
@@ -270,6 +286,7 @@ def _process_video(
         candidates=len(indices),
         written=0,
         auto_blur_threshold=auto_threshold,
+        watermarks=[wm.as_dict() for wm in watermark_regions],
     )
 
     # ── Diversity filters (per-video state) ──────────────────────
@@ -478,6 +495,20 @@ def _process_video(
             )
 
     writer.close()  # block until all PNG writes complete
+    # In ffmpeg keyframe mode, indices was empty; record actual decoded count.
+    if use_ffmpeg_keyframes and stats.candidates == 0:
+        # n is the last value of enumerate; +1 for count. If no frames decoded,
+        # n won't exist. Track via written + rejection counts.
+        stats.candidates = (
+            stats.written
+            + stats.rejected_blur
+            + stats.rejected_luma
+            + stats.rejected_too_small
+            + stats.rejected_dup
+            + stats.rejected_ssim
+            + stats.rejected_color
+            + stats.rejected_completeness
+        )
     stats.elapsed_s = time.perf_counter() - t0
 
     stats_path = _stats_path(cfg, video)
@@ -640,6 +671,35 @@ def run_pipeline(
             all_image_paths, cfg.output / "_gallery.html"
         )
         html_path = str(hg) if hg else None
+
+    # Pre-flight report (purely additive: doesn't touch the images).
+    try:
+        # Build a richer summary that includes records for histograms
+        report_summary = {
+            "total_written": sum(v.written for v in all_stats),
+            "total_candidates": sum(v.candidates for v in all_stats),
+            "elapsed_s": elapsed,
+            "videos": [
+                {
+                    "video": v.video,
+                    "written": v.written,
+                    "candidates": v.candidates,
+                    "rejected_blur": v.rejected_blur,
+                    "rejected_ssim": v.rejected_ssim,
+                    "rejected_color": v.rejected_color,
+                    "rejected_dup": v.rejected_dup,
+                    "elapsed_s": v.elapsed_s,
+                    "watermarks": v.watermarks,
+                    "records": [
+                        {"blur": r.blur, "bucket": list(r.bucket)} for r in v.records
+                    ],
+                }
+                for v in all_stats
+            ],
+        }
+        generate_report(report_summary, cfg.output / "_report.html")
+    except Exception as e:  # noqa: BLE001
+        log.debug("report generation failed: %s", e)
 
     result = PipelineResult(
         config=cfg,

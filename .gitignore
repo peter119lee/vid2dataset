@@ -66,3 +66,10 @@ out/
 v0?_test/
 smoke_out/
 test_*/
+
+# Debug images
+debug_*.png
+check_*.jpg
+end_*.jpg
+wm_*.jpg
+mindouf_*.jpg

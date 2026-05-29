@@ -255,6 +255,13 @@ class ExtractConfig(BaseModel):
     )
 
     # ── Decode mode ──────────────────────────────────────────────────
+    detect_watermark: bool = Field(
+        True,
+        description="Scan each video for static text/logo overlays (URLs, artist "
+        "tags, recording-software HUDs). Findings are LOGGED and saved to the "
+        "per-video stats; the pipeline does NOT crop or modify output bytes. "
+        "Set False to skip the scan entirely.",
+    )
     gpu_accel: bool = Field(
         False,
         description="Experimental: use GPU video decoding (NVDEC/QSV/etc.) "
