@@ -46,6 +46,8 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121 --upgrade  
 
 Then `vid2dataset app` to launch the GUI, or `vid2dataset extract --help` for CLI.
 
+**Need help choosing parameters? See [USAGE.md](USAGE.md) for a parameter-by-parameter guide with recommended values for common scenarios.**
+
 ---
 
 ## Platform support / 平台支持
