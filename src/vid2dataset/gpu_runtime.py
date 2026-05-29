@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -92,15 +93,47 @@ _TORCH_VERSIONS = {
 }
 
 
+def _resolve_torch_url(cuda_tag: str, torch_ver: str) -> str:
+    """Look up the actual torch wheel URL on PyTorch's CDN.
+
+    PyTorch publishes an HTML index at /whl/{cuda_tag}/torch/ with anchors
+    to the real files (currently hosted on download-r2.pytorch.org). We
+    parse the index, find the matching wheel, and return its URL.
+    """
+    pyt = _py_tag()
+    index_url = f"https://download.pytorch.org/whl/{cuda_tag}/torch/"
+    req = urllib.request.Request(
+        index_url, headers={"User-Agent": "vid2dataset/0.8"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not fetch PyTorch index for {cuda_tag}: {e}"
+        ) from e
+
+    # Filename we want, with + URL-encoded as %2B in the href
+    target_fn_plain = f"torch-{torch_ver}+{cuda_tag}-{pyt}-{pyt}-win_amd64.whl"
+    target_fn_enc = f"torch-{torch_ver}%2B{cuda_tag}-{pyt}-{pyt}-win_amd64.whl"
+    pattern = re.compile(r'href="([^"]+)"')
+    for m in pattern.finditer(html):
+        href = m.group(1)
+        if target_fn_enc in href or target_fn_plain in href:
+            # Strip integrity fragment (#sha256=...) so urllib can use the URL
+            return href.split("#")[0]
+    raise RuntimeError(
+        f"Could not find torch wheel for {target_fn_plain} in {index_url}. "
+        f"PyTorch may have changed format or the version doesn't exist for "
+        f"this CUDA tag + Python version."
+    )
+
+
 def _wheel_urls(cuda_tag: str = "cu121") -> dict[str, str]:
     """Build the wheel URL map for the given CUDA tag."""
-    pyt = _py_tag()
     torch_ver = _TORCH_VERSIONS.get(cuda_tag, "2.5.1")
     urls: dict[str, str] = {
-        "torch": (
-            f"https://download.pytorch.org/whl/{cuda_tag}/"
-            f"torch-{torch_ver}+{cuda_tag}-{pyt}-{pyt}-win_amd64.whl"
-        ),
+        "torch": _resolve_torch_url(cuda_tag, torch_ver),
     }
     for pkg, ver in _PYPI_DEPS:
         urls[pkg] = _query_pypi_url(pkg, ver)
@@ -436,19 +469,19 @@ def download_runtime(
             _download_with_progress(url, target, name, progress)
         except Exception as e:
             log.error("Download failed for %s: %s", name, e)
-            return False
+            raise RuntimeError(f"Download failed for {name}: {e}") from e
 
     # Extract each wheel to RUNTIME_DIR (so it ends up like a site-packages tree)
     for name in wheels:
         whl = RUNTIME_DIR / "_wheels" / f"{name}.whl"
         if not whl.exists():
-            return False
+            raise RuntimeError(f"Wheel file missing after download: {name}.whl")
         try:
             with zipfile.ZipFile(whl) as z:
                 z.extractall(RUNTIME_DIR)
         except Exception as e:
             log.error("Extract failed for %s: %s", name, e)
-            return False
+            raise RuntimeError(f"Extract failed for {name}: {e}") from e
 
     # Clean up wheel files (saved ~2 GB after extraction)
     shutil.rmtree(RUNTIME_DIR / "_wheels", ignore_errors=True)
