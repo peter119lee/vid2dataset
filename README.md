@@ -27,12 +27,11 @@ deduplicated, properly bucketed image dataset — no coding required.
 
 No Python needed. / 不需要 Python。
 
-### Option B: GPU version (NVIDIA) / GPU 加速版
+### Option B: GPU acceleration / GPU 加速
 
-1. Download `vid2dataset-gpu.7z.001` + `vid2dataset-gpu.7z.002` (2.4 GB total)
-2. Right-click `.001` → 7-Zip → Extract Here
-3. Double-click `vid2dataset-gpu.exe`, tick **GPU 加速**
-4. Bundles PyTorch + CUDA 12.1 — works on any modern NVIDIA GPU
+NVIDIA users get GPU SSIM speedup by ticking **GPU 加速** in the app. The first time you enable it, the app downloads PyTorch + CUDA 12.1 (~2.4 GB) to `%LOCALAPPDATA%/vid2dataset/gpu_runtime/`. Subsequent runs use the cached runtime — no re-download. / 首次勾选会下载 PyTorch + CUDA（约 2.4 GB）到本地快取，之后直接使用。
+
+No separate GPU .exe needed any more.
 
 ### Option C: From source / 从源码安装
 

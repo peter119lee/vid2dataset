@@ -4,6 +4,28 @@ All notable changes to vid2dataset are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning is [SemVer](https://semver.org/).
 
+## [0.8.0] - 2026-05-29
+
+### Changed
+- **GPU runtime now downloads on-demand**: the standalone 2.4 GB `vid2dataset-gpu.exe`
+  is gone. The single `vid2dataset.exe` (151 MB) shows a GPU checkbox; ticking it on
+  the first time prompts to download PyTorch + CUDA 12.1 (~2.4 GB) to`
+  `%LOCALAPPDATA%/vid2dataset/gpu_runtime/`. Subsequent runs use the cache
+  and skip the download.
+- **GPU acceleration without bloating the .exe**: 99%% of users (CPU-only / no
+  NVIDIA GPU / don't want GPU) save 2.3 GB on the initial download. Users who
+  do want GPU pay the cost once.
+
+### Added
+- `gpu_runtime.py` module with `runtime_status()`, `download_runtime()`,
+  `activate_runtime()`, `remove_runtime()`.
+- Background-thread downloader with per-package progress (`Downloading torch: 47%%`).
+- Self-healing: corrupt cache is detected by missing manifest or torch import failure;
+  user can remove `%LOCALAPPDATA%/vid2dataset/gpu_runtime` and re-download.
+
+### Removed
+- `vid2dataset-gpu.exe` and `build_exe_gpu.py` (the 2.4 GB bundled-CUDA variant).
+
 ## [0.7.0] - 2026-05-29
 
 ### Added

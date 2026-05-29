@@ -182,6 +182,13 @@ class App(ctk.CTk):
         self.chk_flatten = ctk.CTkCheckBox(chk, text=t("flatten_output", self.lang), variable=self.flatten_var)
         self.chk_flatten.pack(side="left", padx=(0, 14))
         Tooltip(self.chk_flatten, lambda: t("tip_flatten", self.lang), wraplength=380)
+        self.gpu_var = ctk.BooleanVar(value=False)
+        self.chk_gpu = ctk.CTkCheckBox(
+            chk, text=t("gpu_accel", self.lang), variable=self.gpu_var,
+            command=self._on_gpu_toggle,
+        )
+        self.chk_gpu.pack(side="left", padx=(0, 14))
+        Tooltip(self.chk_gpu, lambda: t("tip_gpu", self.lang), wraplength=380)
 
         # Run
         run_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -234,6 +241,86 @@ class App(ctk.CTk):
         if p:
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, p)
+
+    def _on_gpu_toggle(self) -> None:
+        """Called when user clicks the GPU checkbox.
+
+        If torch is already available, keep the tick. If runtime is
+        cached but not loaded, activate it. Otherwise prompt to download.
+        """
+        if not self.gpu_var.get():
+            return
+
+        from vid2dataset.gpu_runtime import (
+            activate_runtime,
+            runtime_status,
+            total_download_size_mb,
+        )
+        status = runtime_status()
+        if status.available:
+            return
+
+        if status.cached:
+            if activate_runtime():
+                messagebox.showinfo("vid2dataset", t("gpu_activated", self.lang))
+            else:
+                self.gpu_var.set(False)
+                messagebox.showerror(t("error", self.lang), t("gpu_activate_failed", self.lang))
+            return
+
+        ans = messagebox.askyesno(
+            "vid2dataset",
+            t("gpu_download_prompt", self.lang, mb=total_download_size_mb()),
+        )
+        if not ans:
+            self.gpu_var.set(False)
+            return
+        self._download_gpu_runtime()
+
+    def _download_gpu_runtime(self) -> None:
+        """Download torch+cuda wheels in a background thread."""
+        from vid2dataset.gpu_runtime import download_runtime
+
+        self.chk_gpu.configure(state="disabled")
+        self.status_var.set(t("gpu_downloading", self.lang))
+        self.progress.start()
+
+        def progress_cb(label: str, done: int, total: int) -> None:
+            if total > 0:
+                pct = done * 100 // total
+                txt = t("gpu_downloading_pkg", self.lang, pkg=label, pct=pct)
+                self.after(0, lambda s=txt: self.status_var.set(s))
+
+        def worker() -> None:
+            ok = False
+            err = ""
+            try:
+                ok = download_runtime(progress=progress_cb)
+            except Exception as exc:
+                err = str(exc)
+            self.after(0, lambda: self._on_gpu_download_done(ok, err))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_gpu_download_done(self, ok: bool, err: str) -> None:
+        from vid2dataset.gpu_runtime import activate_runtime
+
+        self.progress.stop()
+        self.chk_gpu.configure(state="normal")
+        if not ok:
+            self.gpu_var.set(False)
+            self.status_var.set(t("gpu_download_failed", self.lang))
+            messagebox.showerror(
+                t("error", self.lang),
+                f"{t('gpu_download_failed', self.lang)}: {err}",
+            )
+            return
+        if activate_runtime():
+            self.status_var.set(t("gpu_ready", self.lang))
+            messagebox.showinfo("vid2dataset", t("gpu_ready", self.lang))
+        else:
+            self.gpu_var.set(False)
+            messagebox.showerror(t("error", self.lang), t("gpu_activate_failed", self.lang))
 
     def _open_output(self) -> None:
         p = self.output_entry.get().strip()
