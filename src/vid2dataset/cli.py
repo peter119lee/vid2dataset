@@ -355,6 +355,75 @@ def _print_summary(result: PipelineResult) -> None:
         console.print(f"[dim]HTML gallery:[/] {result.html_gallery_path}")
 
 
+
+
+@app.command("gpu-test")
+def gpu_test() -> None:
+    """Diagnose GPU runtime activation. Prints what loads / what fails.
+
+    Used to debug 'cannot load GPU runtime' errors in the .exe build.
+    """
+    import traceback
+
+    from vid2dataset.gpu_runtime import (
+        RUNTIME_DIR,
+        activate_runtime,
+        detect_gpu,
+        runtime_status,
+    )
+    print(f"[INFO] Runtime dir: {RUNTIME_DIR}")
+    print(f"[INFO] Cache exists: {RUNTIME_DIR.exists()}")
+    if RUNTIME_DIR.exists():
+        files = sorted(p.name for p in RUNTIME_DIR.iterdir())
+        print(f"[INFO] Cache contents ({len(files)} entries): {files[:15]}")
+    s = runtime_status()
+    print(f"[INFO] cached={s.cached} size={s.size_mb:.1f}MB available={s.available}")
+    print(f"[INFO] GPU: {detect_gpu()}")
+    print(f"[INFO] sys.path before activate: {sys.path[:6]}")
+
+    print("\\n[STEP] Calling activate_runtime()...")
+    ok, err = activate_runtime()
+    print(f"[RESULT] ok={ok}, err={err!r}")
+    if not ok:
+        print("[FAIL] Activation failed.")
+        raise typer.Exit(1)
+
+    # Now actually exercise things
+    try:
+        print("\\n[STEP] import torch from cache...")
+        import torch
+        print(f"  torch={torch.__version__} from {torch.__file__}")
+        print(f"  cuda available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"  device: {torch.cuda.get_device_name(0)}")
+            x = torch.randn(64, 64, device='cuda')
+            y = (x @ x.T).sum().item()
+            print(f"  matmul OK: sum={y:.4f}")
+    except Exception as e:
+        print(f"[FAIL] torch test failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise typer.Exit(1) from e
+
+    try:
+        print("\n[STEP] import gpu_filters...")
+        from vid2dataset.gpu_filters import (
+            BatchSSIMFilter,
+            device_summary,
+            is_gpu_pipeline_available,
+        )
+        print(f"  device_summary: {device_summary()}")
+        print(f"  pipeline available: {is_gpu_pipeline_available()}")
+        # Construct filter (this is what the real pipeline does)
+        flt = BatchSSIMFilter(ssim_threshold=0.85)
+        print(f"  BatchSSIMFilter constructed OK: {flt}")
+    except Exception as e:
+        print(f"[FAIL] gpu_filters test failed: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise typer.Exit(1) from e
+
+    print("\n[OK] === GPU runtime fully working ===")
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app()

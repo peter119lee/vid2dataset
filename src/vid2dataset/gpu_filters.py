@@ -30,13 +30,33 @@ except ImportError:
     _HAS_TORCH = False
 
 
+def _ensure_torch() -> bool:
+    """Lazy-recheck torch availability.
+
+    The .exe build excludes torch and downloads it at runtime via
+    activate_runtime(). At module load time torch was unavailable, so
+    _HAS_TORCH was set to False. After activation it IS available, so we
+    re-attempt the import here. Idempotent.
+    """
+    global torch, _HAS_TORCH
+    if _HAS_TORCH:
+        return True
+    try:
+        import torch as _torch  # noqa: F401
+        torch = _torch  # type: ignore
+        _HAS_TORCH = True
+        return True
+    except ImportError:
+        return False
+
+
 def is_torch_available() -> bool:
-    return _HAS_TORCH
+    return _ensure_torch()
 
 
 def best_device() -> str:
     """Pick the best available torch device. Returns 'cuda' / 'mps' / 'cpu'."""
-    if not _HAS_TORCH:
+    if not _ensure_torch():
         return "cpu"
     if torch.cuda.is_available():
         return "cuda"
@@ -52,7 +72,7 @@ def is_gpu_pipeline_available() -> bool:
 
 def device_summary() -> str:
     """One-line description of the GPU pipeline state."""
-    if not _HAS_TORCH:
+    if not _ensure_torch():
         return "PyTorch not installed (CPU pipeline only)"
     dev = best_device()
     if dev == "cpu":
@@ -83,7 +103,7 @@ class BatchSSIMFilter:
     def __init__(self, *, ssim_threshold: float = 0.85, max_compare: int = 20) -> None:
         self.threshold = ssim_threshold
         self.max_compare = max_compare
-        self.device = best_device() if _HAS_TORCH else "cpu"
+        self.device = best_device() if _ensure_torch() else "cpu"
         # Validated on first use; if False we fall back to CPU SSIM
         self._validated: bool | None = None
         # Stored thumbnails as a single tensor [N, 1, H, W] on device, float32
@@ -128,7 +148,7 @@ class BatchSSIMFilter:
 
     def _validate_once(self, frame_bgr: np.ndarray) -> bool:
         """Compare GPU SSIM to CPU SSIM on the same pair. Mark filter as validated."""
-        if not _HAS_TORCH or self.device == "cpu":
+        if not _ensure_torch() or self.device == "cpu":
             self._validated = False
             return False
         try:
@@ -213,7 +233,7 @@ class BatchColorFilter:
     def __init__(self, *, min_distance: float = 0.08, max_compare: int = 15) -> None:
         self.min_distance = min_distance
         self.max_compare = max_compare
-        self.device = best_device() if _HAS_TORCH else "cpu"
+        self.device = best_device() if _ensure_torch() else "cpu"
         self._validated: bool | None = None
         # Stored fingerprints: tensor [N, 512] on device or list of np arrays
         self._fps = None  # type: ignore
@@ -263,7 +283,7 @@ class BatchColorFilter:
         return (diff / (denom + eps)).sum(dim=1)
 
     def _validate_once(self, frame_bgr: np.ndarray) -> bool:
-        if not _HAS_TORCH or self.device == "cpu":
+        if not _ensure_torch() or self.device == "cpu":
             self._validated = False
             return False
         try:
@@ -288,7 +308,7 @@ class BatchColorFilter:
             self._validate_once(frame_bgr)
         if self._fps is None:
             return True
-        if not _HAS_TORCH or not self._validated:
+        if not _ensure_torch() or not self._validated:
             return self._is_diverse_cpu(frame_bgr)
         fp = self._hist_gpu(self._hsv(frame_bgr))
         dists = self._chi2_gpu_batch(fp, self._fps)
