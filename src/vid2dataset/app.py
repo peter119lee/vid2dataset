@@ -265,11 +265,15 @@ class App(ctk.CTk):
             return
 
         if status.cached:
-            if activate_runtime():
+            ok, err = activate_runtime()
+            if ok:
                 messagebox.showinfo("vid2dataset", t("gpu_activated", self.lang))
             else:
                 self.gpu_var.set(False)
-                messagebox.showerror(t("error", self.lang), t("gpu_activate_failed", self.lang))
+                messagebox.showerror(
+                    t("error", self.lang),
+                    f"{t('gpu_activate_failed', self.lang)}\n\n{err}",
+                )
             return
 
         # Hardware-aware download dialog
@@ -347,12 +351,16 @@ class App(ctk.CTk):
                 f"{t('gpu_download_failed', self.lang)}: {err}",
             )
             return
-        if activate_runtime():
+        ok2, err2 = activate_runtime()
+        if ok2:
             self.status_var.set(t("gpu_ready", self.lang))
             messagebox.showinfo("vid2dataset", t("gpu_ready", self.lang))
         else:
             self.gpu_var.set(False)
-            messagebox.showerror(t("error", self.lang), t("gpu_activate_failed", self.lang))
+            messagebox.showerror(
+                t("error", self.lang),
+                f"{t('gpu_activate_failed', self.lang)}\n\n{err2}",
+            )
 
     def _open_output(self) -> None:
         p = self.output_entry.get().strip()

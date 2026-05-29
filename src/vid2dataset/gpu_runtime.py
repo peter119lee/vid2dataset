@@ -38,7 +38,7 @@ RUNTIME_DIR = (
     Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local"))) / "vid2dataset" / "gpu_runtime"
 )
 MANIFEST_FILE = "manifest.json"
-RUNTIME_VERSION = "torch2.5.1+cu121"  # bump when we change wheel URLs
+RUNTIME_VERSION = "torch2.5.1+cu121+numpy"  # bump invalidates v0.8.x cache  # bump when we change wheel URLs
 
 
 # ── Wheel URLs ─────────────────────────────────────────────────────────
@@ -550,19 +550,20 @@ def _download_with_progress(
                     progress(label, done, total)
 
 
-def activate_runtime() -> bool:
-    """Add the runtime to ``sys.path`` and configure DLL loading.
+def activate_runtime() -> tuple[bool, str]:
+    """Add the runtime to `sys.path` and configure DLL loading.
 
-    Returns True if torch becomes importable after this call.
+    Returns (success, error_message). On success error_message is empty;
+    on failure it contains the underlying error text so the GUI can show
+    it to the user.
     """
     if not (RUNTIME_DIR / "torch" / "__init__.py").exists():
-        return False
+        return False, "torch/__init__.py not found in cache directory"
 
     runtime_str = str(RUNTIME_DIR)
     if runtime_str not in sys.path:
         sys.path.insert(0, runtime_str)
 
-    # CUDA dlls live under torch/lib. Tell Windows to look there.
     if sys.platform == "win32":
         cuda_dll_dir = RUNTIME_DIR / "torch" / "lib"
         if cuda_dll_dir.exists():
@@ -571,13 +572,30 @@ def activate_runtime() -> bool:
             except Exception as e:
                 log.warning("Could not add DLL directory: %s", e)
 
-    # Verify
+    # Clear any partially-loaded torch first so we definitely use the cache copy.
+    for mod in list(sys.modules):
+        if mod == "torch" or mod.startswith("torch."):
+            del sys.modules[mod]
+
     try:
-        import torch  # noqa: F401  type: ignore[import-not-found]
-        return True
+        import torch  # type: ignore[import-not-found]
+        try:
+            available = bool(torch.cuda.is_available())
+        except Exception as e:
+            return False, f"torch loaded but cuda check failed: {type(e).__name__}: {e}"
+        if not available:
+            return False, (
+                "torch loaded but torch.cuda.is_available() is False. "
+                "Likely missing or outdated NVIDIA driver, or the downloaded "
+                "CUDA build does not match your GPU."
+            )
+        return True, ""
     except ImportError as e:
         log.error("Failed to import torch from runtime: %s", e)
-        return False
+        return False, f"ImportError: {e}"
+    except Exception as e:
+        log.error("Unexpected error activating runtime: %s", e)
+        return False, f"{type(e).__name__}: {e}"
 
 
 def remove_runtime() -> bool:
