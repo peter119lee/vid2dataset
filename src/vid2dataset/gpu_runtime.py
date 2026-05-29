@@ -345,12 +345,14 @@ def runtime_supported(hw: HardwareProfile) -> tuple[bool, str]:
 # ── Mirror speed selection ─────────────────────────────────────────────
 
 
-# Mirrors that host PyTorch CUDA wheels. Order doesn't matter — we race them.
+# Verified mirrors that actually serve PyTorch CUDA wheels.
+# Tsinghua / Aliyun PyPI mirrors do NOT host the +cuXXX builds, only the CPU
+# torch — they're useless for this purpose. SJTU mirrors PyTorch's CDN for
+# China users.
 PYTORCH_MIRRORS = {
     "official": "https://download.pytorch.org/whl/{cuda}/",
-    "tsinghua": "https://pypi.tuna.tsinghua.edu.cn/simple/torch/",
-    "aliyun":   "https://mirrors.aliyun.com/pypi/simple/torch/",
-    "ustc":     "https://mirrors.ustc.edu.cn/pypi/web/simple/torch/",
+    "r2":       "https://download-r2.pytorch.org/whl/{cuda}/",
+    "sjtu":     "https://mirror.sjtu.edu.cn/pytorch-wheels/{cuda}/",
 }
 
 
@@ -360,17 +362,35 @@ def pick_fastest_mirror(
     test_kb: int = 256,
     timeout: float = 5.0,
 ) -> tuple[str, str, float]:
-    """Race the mirrors with a small download. Return (name, base_url, seconds).
+    """Race the mirrors with a small partial download from the actual wheel.
 
-    Falls back to PyTorch official if everything times out.
+    Each mirror is probed by requesting bytes 0..test_kb-1 of the torch wheel
+    file. This proves both connectivity AND that the file actually exists on
+    that mirror (not just that an index page loads).
+
+    Returns (mirror_name, base_url_template, seconds). Falls back to
+    PyTorch official if every mirror times out or 404s.
     """
-    candidates = []
+    pyt = _py_tag()
+    torch_ver = _TORCH_VERSIONS.get(cuda_tag, "2.5.1")
+    test_filename = f"torch-{torch_ver}+{cuda_tag}-{pyt}-{pyt}-win_amd64.whl"
+    candidates: list[tuple[str, str, float]] = []
     for name, template in PYTORCH_MIRRORS.items():
-        url = template.format(cuda=cuda_tag)
+        base = template.format(cuda=cuda_tag)
+        # PyTorch official redirects to r2 for actual files; we hit r2 directly
+        # but for the index probe we pass through the public hostname.
+        if name == "official":
+            try:
+                resolved = _resolve_torch_url(cuda_tag, torch_ver)
+                test_url = resolved
+            except Exception:
+                continue
+        else:
+            test_url = base.rstrip("/") + "/" + test_filename.replace("+", "%2B")
         try:
             t0 = time.perf_counter()
             req = urllib.request.Request(
-                url, headers={
+                test_url, headers={
                     "User-Agent": "vid2dataset/0.8",
                     "Range": f"bytes=0-{test_kb * 1024 - 1}",
                 },
@@ -378,14 +398,18 @@ def pick_fastest_mirror(
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 resp.read()
             elapsed = time.perf_counter() - t0
-            candidates.append((name, url, elapsed))
+            candidates.append((name, test_url, elapsed))
         except Exception as e:
             log.debug("Mirror %s failed: %s", name, e)
             continue
 
     if not candidates:
-        # All timed out — use official as last resort
-        return ("official", PYTORCH_MIRRORS["official"].format(cuda=cuda_tag), -1.0)
+        # All failed — fall back to PyTorch official, even if untested
+        try:
+            url = _resolve_torch_url(cuda_tag, torch_ver)
+        except Exception:
+            url = PYTORCH_MIRRORS["official"].format(cuda=cuda_tag)
+        return ("official", url, -1.0)
     candidates.sort(key=lambda x: x[2])
     log.info("Mirror race: %s", [(n, f"{t:.2f}s") for n, _, t in candidates])
     return candidates[0]
@@ -449,6 +473,7 @@ def download_runtime(
     progress: ProgressCallback | None = None,
     *,
     cuda_tag: str | None = None,
+    torch_url: str | None = None,
 ) -> bool:
     """Download wheels into the cache and extract them.
 
@@ -460,6 +485,10 @@ def download_runtime(
         hw = detect_gpu()
         cuda_tag = cuda_version_for_profile(hw) or "cu121"
     wheels = _wheel_urls(cuda_tag)
+    # If caller provided a specific torch URL (e.g. from a mirror race),
+    # override the auto-resolved URL.
+    if torch_url:
+        wheels["torch"] = torch_url
 
     for name, url in wheels.items():
         log.info("Downloading %s from %s", name, url)

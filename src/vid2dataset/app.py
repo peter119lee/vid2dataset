@@ -294,6 +294,7 @@ class App(ctk.CTk):
         mirror_name, mirror_url, mirror_t = pick_fastest_mirror(cuda_tag)
 
         self._pending_cuda_tag = cuda_tag
+        self._pending_torch_url = mirror_url
 
         prompt = t(
             "gpu_download_prompt_v2", self.lang,
@@ -326,7 +327,7 @@ class App(ctk.CTk):
             ok = False
             err = ""
             try:
-                ok = download_runtime(progress=progress_cb, cuda_tag=getattr(self, "_pending_cuda_tag", None))
+                ok = download_runtime(progress=progress_cb, cuda_tag=getattr(self, "_pending_cuda_tag", None), torch_url=getattr(self, "_pending_torch_url", None))
             except Exception as exc:
                 err = str(exc)
             self.after(0, lambda: self._on_gpu_download_done(ok, err))
