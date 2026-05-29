@@ -170,6 +170,10 @@ class App(ctk.CTk):
         self.subject_var = ctk.BooleanVar(value=False)
         self.chk_subj = ctk.CTkCheckBox(chk, text=t("subject_size", self.lang), variable=self.subject_var)
         self.chk_subj.pack(side="left", padx=(0, 14))
+        self.watermark_var = ctk.BooleanVar(value=True)
+        self.chk_wm = ctk.CTkCheckBox(chk, text=t("watermark", self.lang), variable=self.watermark_var)
+        self.chk_wm.pack(side="left", padx=(0, 14))
+        Tooltip(self.chk_wm, lambda: t("tip_watermark", self.lang), wraplength=380)
 
         # Run
         run_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -354,6 +358,7 @@ class App(ctk.CTk):
         self.chk_auto.configure(text=t("auto_quality", self.lang))
         self.chk_kf.configure(text=t("keyframe", self.lang))
         self.chk_subj.configure(text=t("subject_size", self.lang))
+        self.chk_wm.configure(text=t("watermark", self.lang))
         # Refresh all parameter labels
         for key, lbl in self._param_labels.items():
             lbl.configure(text=t(key, self.lang))
@@ -372,6 +377,7 @@ class App(ctk.CTk):
         self.auto_quality_var.set(bool(cfg.get("auto_quality", False)))
         self.keyframe_var.set(cfg.get("decode_mode", "accurate") == "keyframe")
         self.subject_var.set(bool(cfg.get("subject_size_filter", False)))
+        self.watermark_var.set(bool(cfg.get("detect_watermark", True)))
 
     def _log(self, msg: str) -> None:
         self.log_box.configure(state="normal")
@@ -420,6 +426,7 @@ class App(ctk.CTk):
                 "auto_quality": self.auto_quality_var.get(),
                 "decode_mode": "keyframe" if self.keyframe_var.get() else "accurate",
                 "subject_size_filter": self.subject_var.get(),
+                "detect_watermark": self.watermark_var.get(),
                 "gpu_accel": self.gpu_var.get(),
             })
             for key, entry in self._params.items():
