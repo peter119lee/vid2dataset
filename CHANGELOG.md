@@ -4,6 +4,41 @@ All notable changes to vid2dataset are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning is [SemVer](https://semver.org/).
 
+## [0.9.0] - 2026-07-11
+
+### Fixed
+- **RTX 50-series (Blackwell) GPU runtime was broken**: Blackwell was mapped
+  to cu124 + torch 2.5.1, whose wheels carry no sm_100/sm_120 kernels — users
+  downloaded 2.4 GB that could never run. Blackwell now gets **cu128**
+  (sm 7.5–12.0). Everything else gets **cu126** (sm 5.0–9.0, Maxwell through
+  Hopper — wider legacy coverage than the old cu121, same 12.x driver family).
+- **Stale-cache overlay**: upgrading the runtime used to extract the new torch
+  on top of the old one, leaving orphaned modules/DLLs behind. The downloader
+  now wipes files from a previous runtime version first (wheels being
+  re-downloaded are kept for retry).
+- **Interrupted downloads**: wheels now download to a `.part` file and rename
+  on completion, so a partial file is never mistaken for a finished wheel.
+  Cached wheels are also keyed by their real filename (version + CUDA tag),
+  so a leftover from another version/tag is never reused.
+
+### Changed
+- **GPU runtime: torch 2.5.1 → 2.11.0** (newest torch published for both
+  cu126 and cu128 Windows wheels; cu121/cu124 are no longer built by PyTorch).
+  `RUNTIME_VERSION` bump invalidates old caches; the app will offer to
+  re-download (~2.5 GB cu126 / ~2.7 GB cu128).
+- Runtime dependency pins synced to the build venv: numpy 2.4.6 (ABI must
+  match the .exe bundle), sympy 1.14.0 (torch ≥ 2.6 needs ≥ 1.13.3),
+  **setuptools 80.9.0 added** (hard torch dep on Python 3.12), plus
+  typing_extensions / filelock / fsspec / networkx / jinja2 / MarkupSafe.
+
+### Added
+- **GPU-swap detection**: the manifest now records which CUDA tag the cache
+  was built for. If the detected GPU needs a different tag (e.g. you upgraded
+  from an RTX 40 card to an RTX 50 card), the app offers to download the
+  matching build instead of silently activating an incompatible one.
+- Unit tests for `gpu_runtime` (GPU classification, CUDA tag selection,
+  pin-consistency guards, wheel cache naming, stale-cache wipe).
+
 ## [0.8.0] - 2026-05-29
 
 ### Changed

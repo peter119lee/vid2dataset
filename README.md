@@ -29,7 +29,7 @@ No Python needed. / 不需要 Python。
 
 ### Option B: GPU acceleration / GPU 加速
 
-NVIDIA users get GPU SSIM speedup by ticking **GPU 加速** in the app. The first time you enable it, the app downloads PyTorch + CUDA 12.1 (~2.4 GB) to `%LOCALAPPDATA%/vid2dataset/gpu_runtime/`. Subsequent runs use the cached runtime — no re-download. / 首次勾选会下载 PyTorch + CUDA（约 2.4 GB）到本地快取，之后直接使用。
+NVIDIA users get GPU SSIM speedup by ticking **GPU 加速** in the app. The first time you enable it, the app downloads PyTorch + CUDA 12.6 (12.8 on RTX 50-series) (~2.5-2.7 GB) to `%LOCALAPPDATA%/vid2dataset/gpu_runtime/`. Subsequent runs use the cached runtime — no re-download. / 首次勾选会下载 PyTorch + CUDA（约 2.5-2.7 GB）到本地快取，之后直接使用。
 
 No separate GPU .exe needed any more.
 
@@ -40,7 +40,7 @@ git clone https://github.com/peter119lee/vid2dataset.git
 cd vid2dataset
 pip install -e .[dev]              # CPU only
 pip install -e .[dev,gpu]          # adds torch (CPU build)
-pip install torch --index-url https://download.pytorch.org/whl/cu121 --upgrade  # CUDA
+pip install torch --index-url https://download.pytorch.org/whl/cu126 --upgrade  # CUDA (cu128 for RTX 50-series)
 ```
 
 Then `vid2dataset app` to launch the GUI, or `vid2dataset extract --help` for CLI.
@@ -149,9 +149,8 @@ pip install -e ".[dev]"
 pytest                        # 64+ tests
 ruff check src/ tests/
 
-# Build .exes (Windows)
-python build_exe.py           # CPU .exe (151 MB)
-python build_exe_gpu.py       # GPU .exe (2.4 GB)
+# Build .exe (Windows) — GPU runtime downloads on demand, no separate GPU build
+python build_exe.py           # vid2dataset.exe (~151 MB)
 ```
 
 ### CLI

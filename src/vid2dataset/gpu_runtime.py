@@ -5,12 +5,12 @@ When the user enables GPU acceleration, this module makes sure PyTorch
 PyPI / PyTorch CDN to a per-user cache and adds them to ``sys.path``.
 
 This lets the .exe stay small (~150 MB) while still offering GPU
-acceleration for users who want it. The 2.4 GB CUDA payload is downloaded
+acceleration for users who want it. The ~2.5 GB CUDA payload is downloaded
 once and cached at ``%LOCALAPPDATA%/vid2dataset/gpu_runtime``.
 
 Cross-platform notes:
-- Windows: works for NVIDIA via CUDA 12.1 wheels.
-- Linux: would work with the cu121 wheels too (untested).
+- Windows: works for NVIDIA via CUDA 12.6 wheels (12.8 for Blackwell / RTX 50xx).
+- Linux: would work with the cu126/cu128 wheels too (untested).
 - macOS: torch+MPS uses different wheels (we currently do not auto-download
   on macOS; user should pip-install manually).
 """
@@ -30,20 +30,26 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 log = logging.getLogger(__name__)
 
 # Where to cache the downloaded runtime
 RUNTIME_DIR = (
-    Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local"))) / "vid2dataset" / "gpu_runtime"
+    Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local")))
+    / "vid2dataset"
+    / "gpu_runtime"
 )
 MANIFEST_FILE = "manifest.json"
-RUNTIME_VERSION = "torch2.5.1+cu121+numpy"  # bump invalidates v0.8.x cache  # bump when we change wheel URLs
+RUNTIME_VERSION = (
+    "torch2.11.0+numpy2.4.6"  # bump when wheel pins change; mismatch invalidates cache
+)
 
 
 # ── Wheel URLs ─────────────────────────────────────────────────────────
 # PyPI hosts standard package wheels; PyTorch CDN hosts the CUDA-suffixed torch.
 # The python-version part of the URL is filled in at runtime.
+
 
 def _py_tag() -> str:
     """Return the Python wheel ABI tag for the running interpreter."""
@@ -51,19 +57,25 @@ def _py_tag() -> str:
 
 
 # Spec list: package + version constraint. URLs are looked up on PyPI JSON API.
+# Keep these in sync with the versions bundled into the .exe (the build venv):
+# numpy especially — see comment below.
 _PYPI_DEPS = [
     # numpy first - torch's C extension binds against a specific ABI.
     # Without our own numpy, torch falls back to PyInstaller's bundled
     # numpy (different version) and torch.cuda.is_available() returns False.
-    ("numpy", "2.1.3"),
-    ("typing_extensions", "4.12.2"),
-    ("filelock", "3.16.1"),
-    ("fsspec", "2024.10.0"),
-    ("sympy", "1.13.1"),
+    # MUST match the numpy version in the build venv (and RUNTIME_VERSION).
+    ("numpy", "2.4.6"),
+    # torch >= 2.9 declares setuptools as a hard runtime dep on Python 3.12
+    # (distutils removal); torch 2.11 caps it at < 82.
+    ("setuptools", "80.9.0"),
+    ("typing_extensions", "4.15.0"),
+    ("filelock", "3.29.0"),
+    ("fsspec", "2026.4.0"),
+    ("sympy", "1.14.0"),  # torch >= 2.6 requires sympy >= 1.13.3
     ("mpmath", "1.3.0"),
-    ("networkx", "3.4.2"),
-    ("jinja2", "3.1.4"),
-    ("MarkupSafe", "2.1.5"),
+    ("networkx", "3.6.1"),
+    ("jinja2", "3.1.6"),
+    ("MarkupSafe", "3.0.3"),
 ]
 
 
@@ -90,11 +102,14 @@ def _query_pypi_url(package: str, version: str) -> str:
     raise RuntimeError(f"No suitable wheel for {package}=={version} (Python {pyt})")
 
 
+# 2.11.0 is the newest torch published for BOTH cu126 and cu128 Windows
+# wheels (cu128 builds stopped at 2.11.0; 2.12+ moved to cu130/cu132 which
+# require an R580+ driver). One version = one dep matrix.
 _TORCH_VERSIONS = {
-    "cu118": "2.5.1",
-    "cu121": "2.5.1",
-    "cu124": "2.5.1",
+    "cu126": "2.11.0",
+    "cu128": "2.11.0",
 }
+_DEFAULT_TORCH_VERSION = "2.11.0"
 
 
 def _resolve_torch_url(cuda_tag: str, torch_ver: str) -> str:
@@ -107,15 +122,14 @@ def _resolve_torch_url(cuda_tag: str, torch_ver: str) -> str:
     pyt = _py_tag()
     index_url = f"https://download.pytorch.org/whl/{cuda_tag}/torch/"
     req = urllib.request.Request(
-        index_url, headers={"User-Agent": "vid2dataset/0.8"},
+        index_url,
+        headers={"User-Agent": "vid2dataset/0.9"},
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        raise RuntimeError(
-            f"Could not fetch PyTorch index for {cuda_tag}: {e}"
-        ) from e
+        raise RuntimeError(f"Could not fetch PyTorch index for {cuda_tag}: {e}") from e
 
     # Filename we want, with + URL-encoded as %2B in the href
     target_fn_plain = f"torch-{torch_ver}+{cuda_tag}-{pyt}-{pyt}-win_amd64.whl"
@@ -133,9 +147,9 @@ def _resolve_torch_url(cuda_tag: str, torch_ver: str) -> str:
     )
 
 
-def _wheel_urls(cuda_tag: str = "cu121") -> dict[str, str]:
+def _wheel_urls(cuda_tag: str = "cu126") -> dict[str, str]:
     """Build the wheel URL map for the given CUDA tag."""
-    torch_ver = _TORCH_VERSIONS.get(cuda_tag, "2.5.1")
+    torch_ver = _TORCH_VERSIONS.get(cuda_tag, _DEFAULT_TORCH_VERSION)
     urls: dict[str, str] = {
         "torch": _resolve_torch_url(cuda_tag, torch_ver),
     }
@@ -144,19 +158,17 @@ def _wheel_urls(cuda_tag: str = "cu121") -> dict[str, str]:
     return urls
 
 
-
-
 # ── Hardware / OS detection ────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
 class HardwareProfile:
-    vendor: str       # NVIDIA / AMD / Intel / Apple / Unknown
-    gpu_name: str     # e.g. "NVIDIA GeForce RTX 3090"
-    arch: str         # ampere / ada / blackwell / hopper / turing / etc / "" if unknown
+    vendor: str  # NVIDIA / AMD / Intel / Apple / Unknown
+    gpu_name: str  # e.g. "NVIDIA GeForce RTX 3090"
+    arch: str  # ampere / ada / blackwell / hopper / turing / etc / "" if unknown
     compute_cap: float  # e.g. 8.6 (NVIDIA only), 0.0 if unknown
-    os_name: str      # windows / linux / macos
-    os_arch: str      # x86_64 / arm64
+    os_name: str  # windows / linux / macos
+    os_arch: str  # x86_64 / arm64
 
     def __str__(self) -> str:
         parts = [self.os_name, self.os_arch]
@@ -169,6 +181,7 @@ class HardwareProfile:
 
 def detect_os() -> tuple[str, str]:
     import platform
+
     plat = platform.system().lower()
     if plat == "darwin":
         plat = "macos"
@@ -182,7 +195,10 @@ def _run_cmd(args: list[str], timeout: float = 5.0) -> str:
     """Run a command silently and return stdout. Empty string on failure."""
     try:
         result = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout,
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
             errors="ignore",
             creationflags=0x08000000 if sys.platform == "win32" else 0,
         )
@@ -193,11 +209,13 @@ def _run_cmd(args: list[str], timeout: float = 5.0) -> str:
 
 def _nvidia_smi() -> dict:
     """Query nvidia-smi for GPU name + compute capability + memory."""
-    out = _run_cmd([
-        "nvidia-smi",
-        "--query-gpu=name,compute_cap,memory.total",
-        "--format=csv,noheader,nounits",
-    ])
+    out = _run_cmd(
+        [
+            "nvidia-smi",
+            "--query-gpu=name,compute_cap,memory.total",
+            "--format=csv,noheader,nounits",
+        ]
+    )
     if not out.strip():
         return {}
     line = out.strip().splitlines()[0]
@@ -274,13 +292,21 @@ def detect_gpu() -> HardwareProfile:
             g = gpu.lower()
             if "amd" in g or "radeon" in g:
                 return HardwareProfile(
-                    vendor="AMD", gpu_name=gpu, arch="rdna", compute_cap=0.0,
-                    os_name=os_name, os_arch=os_arch,
+                    vendor="AMD",
+                    gpu_name=gpu,
+                    arch="rdna",
+                    compute_cap=0.0,
+                    os_name=os_name,
+                    os_arch=os_arch,
                 )
             if "intel" in g and ("arc" in g or "iris" in g or "uhd" in g):
                 return HardwareProfile(
-                    vendor="Intel", gpu_name=gpu, arch="xe", compute_cap=0.0,
-                    os_name=os_name, os_arch=os_arch,
+                    vendor="Intel",
+                    gpu_name=gpu,
+                    arch="xe",
+                    compute_cap=0.0,
+                    os_name=os_name,
+                    os_arch=os_arch,
                 )
 
     # Linux fallback: try lspci
@@ -291,20 +317,30 @@ def detect_gpu() -> HardwareProfile:
             if "vga" in ll or "3d controller" in ll or "display" in ll:
                 if "nvidia" in ll:
                     return HardwareProfile(
-                        vendor="NVIDIA", gpu_name=line.split(":")[-1].strip(),
-                        arch="", compute_cap=0.0,
-                        os_name=os_name, os_arch=os_arch,
+                        vendor="NVIDIA",
+                        gpu_name=line.split(":")[-1].strip(),
+                        arch="",
+                        compute_cap=0.0,
+                        os_name=os_name,
+                        os_arch=os_arch,
                     )
                 if "amd" in ll or "radeon" in ll:
                     return HardwareProfile(
-                        vendor="AMD", gpu_name=line.split(":")[-1].strip(),
-                        arch="rdna", compute_cap=0.0,
-                        os_name=os_name, os_arch=os_arch,
+                        vendor="AMD",
+                        gpu_name=line.split(":")[-1].strip(),
+                        arch="rdna",
+                        compute_cap=0.0,
+                        os_name=os_name,
+                        os_arch=os_arch,
                     )
 
     return HardwareProfile(
-        vendor="Unknown", gpu_name="", arch="", compute_cap=0.0,
-        os_name=os_name, os_arch=os_arch,
+        vendor="Unknown",
+        gpu_name="",
+        arch="",
+        compute_cap=0.0,
+        os_name=os_name,
+        os_arch=os_arch,
     )
 
 
@@ -318,17 +354,14 @@ def cuda_version_for_profile(hw: HardwareProfile) -> str | None:
         return None
     if hw.os_name == "macos":
         return None  # macOS NVIDIA is unsupported by modern torch
-    # Map architecture -> CUDA wheel tag
+    # Map architecture -> CUDA wheel tag.
+    # cu128 wheels carry sm 7.5-12.0 (Turing through Blackwell); Blackwell
+    # (sm_100/sm_120) is NOT in cu126, so RTX 50xx must get cu128.
     if hw.arch == "blackwell":
-        return "cu124"   # RTX 50xx requires CUDA 12.4+
-    if hw.arch == "hopper":
-        return "cu121"   # H100 fine on cu121
-    if hw.arch in ("ada", "ampere"):
-        return "cu121"   # safe default
-    if hw.arch == "turing":
-        return "cu118"   # older GPUs prefer cu118
-    # Unknown NVIDIA -> safe default
-    return "cu121"
+        return "cu128"
+    # cu126 wheels carry sm 5.0-9.0 (Maxwell through Hopper) — the widest
+    # legacy coverage, and the same CUDA 12.x driver family as the old cu121.
+    return "cu126"
 
 
 def runtime_supported(hw: HardwareProfile) -> tuple[bool, str]:
@@ -338,9 +371,15 @@ def runtime_supported(hw: HardwareProfile) -> tuple[bool, str]:
             return False, "NVIDIA on macOS is not supported by modern PyTorch."
         return True, ""
     if hw.vendor == "Apple":
-        return False, "Apple Silicon needs PyTorch+MPS via pip install (auto-download not supported on macOS)."
+        return (
+            False,
+            "Apple Silicon needs PyTorch+MPS via pip install (auto-download not supported on macOS).",
+        )
     if hw.vendor == "AMD":
-        return False, "AMD GPU detected. PyTorch+ROCm only works on Linux and is not auto-downloaded. Use pip install on Linux."
+        return (
+            False,
+            "AMD GPU detected. PyTorch+ROCm only works on Linux and is not auto-downloaded. Use pip install on Linux.",
+        )
     if hw.vendor == "Intel":
         return False, "Intel GPU detected. PyTorch does not support Intel Arc/iGPU acceleration."
     return False, "No NVIDIA GPU detected. GPU acceleration requires NVIDIA + CUDA."
@@ -355,8 +394,8 @@ def runtime_supported(hw: HardwareProfile) -> tuple[bool, str]:
 # China users.
 PYTORCH_MIRRORS = {
     "official": "https://download.pytorch.org/whl/{cuda}/",
-    "r2":       "https://download-r2.pytorch.org/whl/{cuda}/",
-    "sjtu":     "https://mirror.sjtu.edu.cn/pytorch-wheels/{cuda}/",
+    "r2": "https://download-r2.pytorch.org/whl/{cuda}/",
+    "sjtu": "https://mirror.sjtu.edu.cn/pytorch-wheels/{cuda}/",
 }
 
 
@@ -376,7 +415,7 @@ def pick_fastest_mirror(
     PyTorch official if every mirror times out or 404s.
     """
     pyt = _py_tag()
-    torch_ver = _TORCH_VERSIONS.get(cuda_tag, "2.5.1")
+    torch_ver = _TORCH_VERSIONS.get(cuda_tag, _DEFAULT_TORCH_VERSION)
     test_filename = f"torch-{torch_ver}+{cuda_tag}-{pyt}-{pyt}-win_amd64.whl"
     candidates: list[tuple[str, str, float]] = []
     for name, template in PYTORCH_MIRRORS.items():
@@ -394,8 +433,9 @@ def pick_fastest_mirror(
         try:
             t0 = time.perf_counter()
             req = urllib.request.Request(
-                test_url, headers={
-                    "User-Agent": "vid2dataset/0.8",
+                test_url,
+                headers={
+                    "User-Agent": "vid2dataset/0.9",
                     "Range": f"bytes=0-{test_kb * 1024 - 1}",
                 },
             )
@@ -418,6 +458,7 @@ def pick_fastest_mirror(
     log.info("Mirror race: %s", [(n, f"{t:.2f}s") for n, _, t in candidates])
     return candidates[0]
 
+
 # ── Public API ─────────────────────────────────────────────────────────
 
 
@@ -428,6 +469,7 @@ class RuntimeStatus:
     version: str | None
     cache_dir: Path
     size_mb: float
+    cuda_tag: str | None = None  # CUDA tag the cache was built for (from manifest)
 
 
 def runtime_status() -> RuntimeStatus:
@@ -435,10 +477,13 @@ def runtime_status() -> RuntimeStatus:
     manifest_path = RUNTIME_DIR / MANIFEST_FILE
     cached = False
     version = None
+    cuda_tag = None
     if manifest_path.exists():
         try:
             data = json.loads(manifest_path.read_text(encoding="utf-8"))
             version = str(data.get("version", ""))
+            raw_tag = data.get("cuda_tag")
+            cuda_tag = str(raw_tag) if raw_tag else None
             cached = version == RUNTIME_VERSION and (RUNTIME_DIR / "torch" / "__init__.py").exists()
         except Exception:
             pass
@@ -447,13 +492,16 @@ def runtime_status() -> RuntimeStatus:
     available = False
     try:
         import torch  # type: ignore[import-not-found]
+
         available = bool(getattr(torch.cuda, "is_available", lambda: False)())
     except ImportError:
         pass
 
     size_mb = 0.0
     if RUNTIME_DIR.exists():
-        size_mb = sum(p.stat().st_size for p in RUNTIME_DIR.rglob("*") if p.is_file()) / (1024 * 1024)
+        size_mb = sum(p.stat().st_size for p in RUNTIME_DIR.rglob("*") if p.is_file()) / (
+            1024 * 1024
+        )
 
     return RuntimeStatus(
         available=available,
@@ -461,16 +509,73 @@ def runtime_status() -> RuntimeStatus:
         version=version,
         cache_dir=RUNTIME_DIR,
         size_mb=size_mb,
+        cuda_tag=cuda_tag,
     )
 
 
-def total_download_size_mb() -> int:
+def total_download_size_mb(cuda_tag: str = "cu126") -> int:
     """Approximate total download size (for showing in confirm dialog)."""
-    return 2400  # ~2.4 GB, dominated by torch+cu121
+    # torch wheel: cu126 ~2.42 GB, cu128 ~2.57 GB; PyPI deps add ~50 MB.
+    return 2700 if cuda_tag == "cu128" else 2500
 
 
 ProgressCallback = Callable[[str, int, int], None]
 """``cb(stage, bytes_done, bytes_total)`` -- bytes_total may be 0 if unknown."""
+
+
+def _wheel_target(name: str, url: str) -> Path:
+    """Cache path for a wheel, keyed by its real filename.
+
+    Using the actual wheel filename (which embeds version + CUDA tag +
+    platform) instead of a generic ``{name}.whl`` means a leftover wheel
+    from an older torch version or a different CUDA tag is never reused.
+    """
+    fn = unquote(Path(urlparse(url).path).name)
+    if not fn.endswith(".whl"):
+        fn = f"{name}.whl"
+    return RUNTIME_DIR / "_wheels" / fn
+
+
+def _clear_stale_cache(wheels: dict[str, str], cuda_tag: str) -> None:
+    """Remove leftovers from a previous runtime before installing.
+
+    A cache is stale when its manifest version differs from RUNTIME_VERSION
+    (older torch / pins) or it was built for a different CUDA tag (e.g. the
+    user upgraded to a Blackwell card). Extracting a new torch on top of a
+    stale one leaves orphaned modules and DLLs behind (files that no longer
+    exist in the new version), which breaks imports in subtle ways. Wheels in
+    ``_wheels`` whose filenames match the current targets are kept so an
+    interrupted download can be retried without re-fetching completed files.
+    """
+    if not RUNTIME_DIR.exists():
+        return
+    manifest_path = RUNTIME_DIR / MANIFEST_FILE
+    current = None
+    current_tag = None
+    if manifest_path.exists():
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            current = data.get("version")
+            current_tag = data.get("cuda_tag")
+        except Exception:
+            current = None
+    if current == RUNTIME_VERSION and current_tag == cuda_tag:
+        return  # cache already holds the target build; nothing stale
+    keep = {_wheel_target(n, u) for n, u in wheels.items()}
+    for p in RUNTIME_DIR.iterdir():
+        if p.name == "_wheels":
+            for w in list(p.iterdir()):
+                if w in keep:
+                    continue
+                if w.is_dir():
+                    shutil.rmtree(w, ignore_errors=True)
+                else:
+                    w.unlink(missing_ok=True)
+            continue
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        else:
+            p.unlink(missing_ok=True)
 
 
 def download_runtime(
@@ -487,7 +592,7 @@ def download_runtime(
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     if cuda_tag is None:
         hw = detect_gpu()
-        cuda_tag = cuda_version_for_profile(hw) or "cu121"
+        cuda_tag = cuda_version_for_profile(hw) or "cu126"
     wheels = _wheel_urls(cuda_tag)
     # If caller provided a specific torch URL (e.g. from a mirror race),
     # override the auto-resolved URL.
@@ -496,7 +601,7 @@ def download_runtime(
 
     for name, url in wheels.items():
         log.info("Downloading %s from %s", name, url)
-        target = RUNTIME_DIR / "_wheels" / f"{name}.whl"
+        target = _wheel_target(name, url)
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             _download_with_progress(url, target, name, progress)
@@ -504,11 +609,17 @@ def download_runtime(
             log.error("Download failed for %s: %s", name, e)
             raise RuntimeError(f"Download failed for {name}: {e}") from e
 
+    # Every wheel is on disk now — only at this point wipe leftovers from an
+    # older runtime version (or a different CUDA tag) before extracting on
+    # top of them. A failed download therefore never destroys a runtime that
+    # still works.
+    _clear_stale_cache(wheels, cuda_tag)
+
     # Extract each wheel to RUNTIME_DIR (so it ends up like a site-packages tree)
-    for name in wheels:
-        whl = RUNTIME_DIR / "_wheels" / f"{name}.whl"
+    for name, url in wheels.items():
+        whl = _wheel_target(name, url)
         if not whl.exists():
-            raise RuntimeError(f"Wheel file missing after download: {name}.whl")
+            raise RuntimeError(f"Wheel file missing after download: {whl.name}")
         try:
             with zipfile.ZipFile(whl) as z:
                 z.extractall(RUNTIME_DIR)
@@ -521,7 +632,7 @@ def download_runtime(
 
     # Write manifest
     (RUNTIME_DIR / MANIFEST_FILE).write_text(
-        json.dumps({"version": RUNTIME_VERSION}, indent=2),
+        json.dumps({"version": RUNTIME_VERSION, "cuda_tag": cuda_tag}, indent=2),
         encoding="utf-8",
     )
     log.info("GPU runtime ready at %s", RUNTIME_DIR)
@@ -538,12 +649,15 @@ def _download_with_progress(
         log.debug("%s already downloaded (%d bytes)", label, target.stat().st_size)
         return
 
-    req = urllib.request.Request(url, headers={"User-Agent": "vid2dataset/0.8"})
+    # Download to a .part file and rename on completion, so an interrupted
+    # download can never be mistaken for a finished wheel.
+    tmp = target.with_suffix(target.suffix + ".part")
+    req = urllib.request.Request(url, headers={"User-Agent": "vid2dataset/0.9"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         total = int(resp.headers.get("Content-Length", 0))
         done = 0
         chunk = 256 * 1024
-        with target.open("wb") as f:
+        with tmp.open("wb") as f:
             while True:
                 buf = resp.read(chunk)
                 if not buf:
@@ -552,6 +666,7 @@ def _download_with_progress(
                 done += len(buf)
                 if progress:
                     progress(label, done, total)
+    tmp.replace(target)
 
 
 def activate_runtime() -> tuple[bool, str]:
@@ -587,6 +702,7 @@ def activate_runtime() -> tuple[bool, str]:
 
     try:
         import torch  # type: ignore[import-not-found]
+
         try:
             available = bool(torch.cuda.is_available())
         except Exception as e:

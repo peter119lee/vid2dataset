@@ -160,23 +160,17 @@ def extract(  # noqa: PLR0913
         str | None,
         typer.Option("--format", "-f", help="png | jpg | webp"),
     ] = None,
-    max_per_video: Annotated[
-        int | None, typer.Option("--max-per-video")
-    ] = None,
+    max_per_video: Annotated[int | None, typer.Option("--max-per-video")] = None,
     no_skip_existing: Annotated[
         bool,
-        typer.Option(
-            "--no-skip-existing", help="Re-process videos even if stats.json exists."
-        ),
+        typer.Option("--no-skip-existing", help="Re-process videos even if stats.json exists."),
     ] = False,
     log_level: Annotated[
         str, typer.Option("--log-level", help="DEBUG | INFO | WARNING | ERROR")
     ] = "INFO",
     dry_run: Annotated[
         bool,
-        typer.Option(
-            "--dry-run", help="Print resolved config and exit without extracting."
-        ),
+        typer.Option("--dry-run", help="Print resolved config and exit without extracting."),
     ] = False,
 ) -> None:
     """Extract a LoRA training set from one or more videos."""
@@ -291,8 +285,7 @@ def gui_cmd(
         from vid2dataset.gui import launch
     except ImportError as e:  # pragma: no cover
         console.print(
-            "[red]Gradio GUI not available.[/] "
-            "Install with: [bold]pip install vid2dataset[gui][/]"
+            "[red]Gradio GUI not available.[/] Install with: [bold]pip install vid2dataset[gui][/]"
         )
         console.print(f"[dim]{e}[/]")
         sys.exit(1)
@@ -303,6 +296,7 @@ def gui_cmd(
 def app_cmd() -> None:
     """Launch the native desktop application (no browser needed)."""
     from vid2dataset.app import main
+
     main()
 
 
@@ -355,8 +349,6 @@ def _print_summary(result: PipelineResult) -> None:
         console.print(f"[dim]HTML gallery:[/] {result.html_gallery_path}")
 
 
-
-
 @app.command("gpu-test")
 def gpu_test() -> None:
     """Diagnose GPU runtime activation. Prints what loads / what fails.
@@ -371,6 +363,7 @@ def gpu_test() -> None:
         detect_gpu,
         runtime_status,
     )
+
     print(f"[INFO] Runtime dir: {RUNTIME_DIR}")
     print(f"[INFO] Cache exists: {RUNTIME_DIR.exists()}")
     if RUNTIME_DIR.exists():
@@ -381,7 +374,7 @@ def gpu_test() -> None:
     print(f"[INFO] GPU: {detect_gpu()}")
     print(f"[INFO] sys.path before activate: {sys.path[:6]}")
 
-    print("\\n[STEP] Calling activate_runtime()...")
+    print("\n[STEP] Calling activate_runtime()...")
     ok, err = activate_runtime()
     print(f"[RESULT] ok={ok}, err={err!r}")
     if not ok:
@@ -390,13 +383,14 @@ def gpu_test() -> None:
 
     # Now actually exercise things
     try:
-        print("\\n[STEP] import torch from cache...")
+        print("\n[STEP] import torch from cache...")
         import torch
+
         print(f"  torch={torch.__version__} from {torch.__file__}")
         print(f"  cuda available: {torch.cuda.is_available()}")
         if torch.cuda.is_available():
             print(f"  device: {torch.cuda.get_device_name(0)}")
-            x = torch.randn(64, 64, device='cuda')
+            x = torch.randn(64, 64, device="cuda")
             y = (x @ x.T).sum().item()
             print(f"  matmul OK: sum={y:.4f}")
     except Exception as e:
@@ -411,6 +405,7 @@ def gpu_test() -> None:
             device_summary,
             is_gpu_pipeline_available,
         )
+
         print(f"  device_summary: {device_summary()}")
         print(f"  pipeline available: {is_gpu_pipeline_available()}")
         # Construct filter (this is what the real pipeline does)

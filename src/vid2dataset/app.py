@@ -83,34 +83,50 @@ class App(ctk.CTk):
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=24, pady=(12, 4))
         header.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(header, text="vid2dataset", font=ctk.CTkFont(size=26, weight="bold")).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(header, text="vid2dataset", font=ctk.CTkFont(size=26, weight="bold")).grid(
+            row=0, column=0, sticky="w"
+        )
         self.update_btn = ctk.CTkButton(
-            header, text=t("check_update", self.lang), width=130,
+            header,
+            text=t("check_update", self.lang),
+            width=130,
             command=self._check_update_async,
         )
         self.update_btn.grid(row=0, column=2, sticky="e", padx=(0, 6))
-        self.lang_btn = ctk.CTkButton(header, text=t("lang_btn", self.lang), width=50, command=self._toggle_lang)
+        self.lang_btn = ctk.CTkButton(
+            header, text=t("lang_btn", self.lang), width=50, command=self._toggle_lang
+        )
         self.lang_btn.grid(row=0, column=3, sticky="e")
-        self.subtitle_lbl = ctk.CTkLabel(header, text=t("subtitle", self.lang), font=ctk.CTkFont(size=12), text_color="#888")
+        self.subtitle_lbl = ctk.CTkLabel(
+            header, text=t("subtitle", self.lang), font=ctk.CTkFont(size=12), text_color="#888"
+        )
         self.subtitle_lbl.grid(row=1, column=0, columnspan=4, sticky="w")
 
         # I/O
         io = ctk.CTkFrame(self)
         io.grid(row=1, column=0, sticky="ew", padx=24, pady=4)
         io.grid_columnconfigure(1, weight=1)
-        self.input_lbl = ctk.CTkLabel(io, text=t("input", self.lang), font=ctk.CTkFont(weight="bold"))
+        self.input_lbl = ctk.CTkLabel(
+            io, text=t("input", self.lang), font=ctk.CTkFont(weight="bold")
+        )
         self.input_lbl.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="w")
         self.input_entry = ctk.CTkEntry(io, placeholder_text="D:\\videos\\...")
         self.input_entry.grid(row=0, column=1, padx=4, pady=(10, 4), sticky="ew")
-        self.input_btn = ctk.CTkButton(io, text=t("browse", self.lang), width=70, command=self._browse_input)
+        self.input_btn = ctk.CTkButton(
+            io, text=t("browse", self.lang), width=70, command=self._browse_input
+        )
         self.input_btn.grid(row=0, column=2, padx=(4, 12), pady=(10, 4))
 
-        self.output_lbl = ctk.CTkLabel(io, text=t("output", self.lang), font=ctk.CTkFont(weight="bold"))
+        self.output_lbl = ctk.CTkLabel(
+            io, text=t("output", self.lang), font=ctk.CTkFont(weight="bold")
+        )
         self.output_lbl.grid(row=1, column=0, padx=12, pady=(4, 10), sticky="w")
         self.output_entry = ctk.CTkEntry(io, placeholder_text="D:\\datasets\\output")
         self.output_entry.insert(0, "output")
         self.output_entry.grid(row=1, column=1, padx=4, pady=(4, 10), sticky="ew")
-        self.output_btn = ctk.CTkButton(io, text=t("browse", self.lang), width=70, command=self._browse_output)
+        self.output_btn = ctk.CTkButton(
+            io, text=t("browse", self.lang), width=70, command=self._browse_output
+        )
         self.output_btn.grid(row=1, column=2, padx=(4, 12), pady=(4, 10))
 
         # Settings
@@ -119,11 +135,21 @@ class App(ctk.CTk):
         settings.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         # Preset row
-        self.preset_lbl = ctk.CTkLabel(settings, text=t("preset", self.lang), font=ctk.CTkFont(weight="bold"))
+        self.preset_lbl = ctk.CTkLabel(
+            settings, text=t("preset", self.lang), font=ctk.CTkFont(weight="bold")
+        )
         self.preset_lbl.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="w")
         self.preset_var = ctk.StringVar(value="anima-style")
-        ctk.CTkOptionMenu(settings, variable=self.preset_var, values=PRESET_NAMES, command=self._apply_preset, width=170).grid(row=0, column=1, padx=4, pady=(10, 4), sticky="w")
-        self.preset_desc = ctk.CTkLabel(settings, text="", text_color="#888", font=ctk.CTkFont(size=11))
+        ctk.CTkOptionMenu(
+            settings,
+            variable=self.preset_var,
+            values=PRESET_NAMES,
+            command=self._apply_preset,
+            width=170,
+        ).grid(row=0, column=1, padx=4, pady=(10, 4), sticky="w")
+        self.preset_desc = ctk.CTkLabel(
+            settings, text="", text_color="#888", font=ctk.CTkFont(size=11)
+        )
         self.preset_desc.grid(row=0, column=2, columnspan=2, padx=8, pady=(10, 4), sticky="w")
 
         # Params
@@ -156,35 +182,49 @@ class App(ctk.CTk):
             tip = Tooltip(tk_widget, lambda k=tip_key: t(k, self.lang))
             self._param_tooltips[key] = tip
             tip_lbl = Tooltip(lbl, lambda k=tip_key: t(k, self.lang))
-            self._param_tooltips[key + '_lbl'] = tip_lbl
+            self._param_tooltips[key + "_lbl"] = tip_lbl
 
         # Checkboxes
         chk = ctk.CTkFrame(settings, fg_color="transparent")
         chk.grid(row=3, column=0, columnspan=4, padx=8, pady=(4, 10), sticky="w")
         self.auto_quality_var = ctk.BooleanVar(value=True)
-        self.chk_auto = ctk.CTkCheckBox(chk, text=t("auto_quality", self.lang), variable=self.auto_quality_var)
+        self.chk_auto = ctk.CTkCheckBox(
+            chk, text=t("auto_quality", self.lang), variable=self.auto_quality_var
+        )
         self.chk_auto.pack(side="left", padx=(4, 14))
         self.keyframe_var = ctk.BooleanVar(value=True)
-        self.chk_kf = ctk.CTkCheckBox(chk, text=t("keyframe", self.lang), variable=self.keyframe_var)
+        self.chk_kf = ctk.CTkCheckBox(
+            chk, text=t("keyframe", self.lang), variable=self.keyframe_var
+        )
         self.chk_kf.pack(side="left", padx=(0, 14))
         self.subject_var = ctk.BooleanVar(value=False)
-        self.chk_subj = ctk.CTkCheckBox(chk, text=t("subject_size", self.lang), variable=self.subject_var)
+        self.chk_subj = ctk.CTkCheckBox(
+            chk, text=t("subject_size", self.lang), variable=self.subject_var
+        )
         self.chk_subj.pack(side="left", padx=(0, 14))
         self.watermark_var = ctk.BooleanVar(value=True)
-        self.chk_wm = ctk.CTkCheckBox(chk, text=t("watermark", self.lang), variable=self.watermark_var)
+        self.chk_wm = ctk.CTkCheckBox(
+            chk, text=t("watermark", self.lang), variable=self.watermark_var
+        )
         self.chk_wm.pack(side="left", padx=(0, 14))
         Tooltip(self.chk_wm, lambda: t("tip_watermark", self.lang), wraplength=380)
         self.crop_wm_var = ctk.BooleanVar(value=False)
-        self.chk_crop_wm = ctk.CTkCheckBox(chk, text=t("crop_watermark", self.lang), variable=self.crop_wm_var)
+        self.chk_crop_wm = ctk.CTkCheckBox(
+            chk, text=t("crop_watermark", self.lang), variable=self.crop_wm_var
+        )
         self.chk_crop_wm.pack(side="left", padx=(0, 14))
         Tooltip(self.chk_crop_wm, lambda: t("tip_crop_watermark", self.lang), wraplength=380)
         self.flatten_var = ctk.BooleanVar(value=False)
-        self.chk_flatten = ctk.CTkCheckBox(chk, text=t("flatten_output", self.lang), variable=self.flatten_var)
+        self.chk_flatten = ctk.CTkCheckBox(
+            chk, text=t("flatten_output", self.lang), variable=self.flatten_var
+        )
         self.chk_flatten.pack(side="left", padx=(0, 14))
         Tooltip(self.chk_flatten, lambda: t("tip_flatten", self.lang), wraplength=380)
         self.gpu_var = ctk.BooleanVar(value=False)
         self.chk_gpu = ctk.CTkCheckBox(
-            chk, text=t("gpu_accel", self.lang), variable=self.gpu_var,
+            chk,
+            text=t("gpu_accel", self.lang),
+            variable=self.gpu_var,
             command=self._on_gpu_toggle,
         )
         self.chk_gpu.pack(side="left", padx=(0, 14))
@@ -194,22 +234,47 @@ class App(ctk.CTk):
         run_frame = ctk.CTkFrame(self, fg_color="transparent")
         run_frame.grid(row=3, column=0, sticky="ew", padx=24, pady=6)
         run_frame.grid_columnconfigure(2, weight=1)
-        self.run_btn = ctk.CTkButton(run_frame, text=t("extract", self.lang), font=ctk.CTkFont(size=14, weight="bold"), height=42, command=self._start)
+        self.run_btn = ctk.CTkButton(
+            run_frame,
+            text=t("extract", self.lang),
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=42,
+            command=self._start,
+        )
         self.run_btn.grid(row=0, column=0, padx=(0, 8))
-        self.cancel_btn = ctk.CTkButton(run_frame, text=t("cancel", self.lang), height=42, width=80, command=self._cancel, state="disabled", fg_color="#8b3a3a", hover_color="#a04848")
+        self.cancel_btn = ctk.CTkButton(
+            run_frame,
+            text=t("cancel", self.lang),
+            height=42,
+            width=80,
+            command=self._cancel,
+            state="disabled",
+            fg_color="#8b3a3a",
+            hover_color="#a04848",
+        )
         self.cancel_btn.grid(row=0, column=1, padx=(0, 12))
         self.progress = ctk.CTkProgressBar(run_frame, mode="indeterminate", height=8)
         self.progress.grid(row=0, column=2, sticky="ew")
         self.progress.set(0)
-        self.open_btn = ctk.CTkButton(run_frame, text=t("open_output", self.lang), width=140, command=self._open_output, state="disabled")
+        self.open_btn = ctk.CTkButton(
+            run_frame,
+            text=t("open_output", self.lang),
+            width=140,
+            command=self._open_output,
+            state="disabled",
+        )
         self.open_btn.grid(row=0, column=3, padx=(12, 0))
 
         # Status
         self.status_var = ctk.StringVar(value=t("ready", self.lang))
-        ctk.CTkLabel(self, textvariable=self.status_var, font=ctk.CTkFont(size=11), text_color="#888").grid(row=4, column=0, sticky="w", padx=28, pady=(2, 0))
+        ctk.CTkLabel(
+            self, textvariable=self.status_var, font=ctk.CTkFont(size=11), text_color="#888"
+        ).grid(row=4, column=0, sticky="w", padx=28, pady=(2, 0))
 
         # Log
-        self.log_box = ctk.CTkTextbox(self, font=ctk.CTkFont(family="Consolas", size=11), corner_radius=8, state="disabled")
+        self.log_box = ctk.CTkTextbox(
+            self, font=ctk.CTkFont(family="Consolas", size=11), corner_radius=8, state="disabled"
+        )
         self.log_box.grid(row=5, column=0, sticky="nsew", padx=24, pady=(4, 14))
 
     # ── Actions ──────────────────────────────────────────────────
@@ -224,6 +289,7 @@ class App(ctk.CTk):
             except Exception:
                 path = str(raw)
             from pathlib import Path as _P
+
             p = _P(path)
             if p.is_dir() or p.is_file():
                 self.input_entry.delete(0, "end")
@@ -260,21 +326,28 @@ class App(ctk.CTk):
             runtime_supported,
             total_download_size_mb,
         )
+
         status = runtime_status()
         if status.available:
             return
 
         if status.cached:
-            ok, err = activate_runtime()
-            if ok:
-                messagebox.showinfo("vid2dataset", t("gpu_activated", self.lang))
-            else:
-                self.gpu_var.set(False)
-                messagebox.showerror(
-                    t("error", self.lang),
-                    f"{t('gpu_activate_failed', self.lang)}\n\n{err}",
-                )
-            return
+            # Re-check the hardware first: a cached cu126 runtime is useless
+            # after an upgrade to a Blackwell card (needs cu128) and vice
+            # versa. On a tag mismatch, fall through to the download flow.
+            hw_now = detect_gpu()
+            wanted_tag = cuda_version_for_profile(hw_now)
+            if wanted_tag is None or status.cuda_tag in (None, wanted_tag):
+                ok, err = activate_runtime()
+                if ok:
+                    messagebox.showinfo("vid2dataset", t("gpu_activated", self.lang))
+                else:
+                    self.gpu_var.set(False)
+                    messagebox.showerror(
+                        t("error", self.lang),
+                        f"{t('gpu_activate_failed', self.lang)}\n\n{err}",
+                    )
+                return
 
         # Hardware-aware download dialog
         self.status_var.set(t("gpu_detecting", self.lang))
@@ -291,7 +364,7 @@ class App(ctk.CTk):
             self.status_var.set(t("ready", self.lang))
             return
 
-        cuda_tag = cuda_version_for_profile(hw) or "cu121"
+        cuda_tag = cuda_version_for_profile(hw) or "cu126"
 
         self.status_var.set(t("gpu_testing_mirrors", self.lang))
         self.update_idletasks()
@@ -301,10 +374,13 @@ class App(ctk.CTk):
         self._pending_torch_url = mirror_url
 
         prompt = t(
-            "gpu_download_prompt_v2", self.lang,
-            hw=str(hw), cuda=cuda_tag, mirror=mirror_name,
+            "gpu_download_prompt_v2",
+            self.lang,
+            hw=str(hw),
+            cuda=cuda_tag,
+            mirror=mirror_name,
             mirror_t=f"{mirror_t:.2f}" if mirror_t > 0 else "?",
-            mb=total_download_size_mb(),
+            mb=total_download_size_mb(cuda_tag),
         )
         self.status_var.set(t("ready", self.lang))
         ans = messagebox.askyesno("vid2dataset", prompt)
@@ -331,7 +407,11 @@ class App(ctk.CTk):
             ok = False
             err = ""
             try:
-                ok = download_runtime(progress=progress_cb, cuda_tag=getattr(self, "_pending_cuda_tag", None), torch_url=getattr(self, "_pending_torch_url", None))
+                ok = download_runtime(
+                    progress=progress_cb,
+                    cuda_tag=getattr(self, "_pending_cuda_tag", None),
+                    torch_url=getattr(self, "_pending_torch_url", None),
+                )
             except Exception as exc:
                 err = str(exc)
             self.after(0, lambda: self._on_gpu_download_done(ok, err))
@@ -368,6 +448,7 @@ class App(ctk.CTk):
             return
         import subprocess
         import sys
+
         try:
             if sys.platform == "win32":
                 os.startfile(p)
@@ -395,23 +476,27 @@ class App(ctk.CTk):
             release = fetch_latest_release()
         except Exception as exc:
             err = str(exc)
-            self.after(0, lambda: messagebox.showerror(
-                t("error", self.lang), f"{t('update_check_failed', self.lang)}: {err}"
-            ))
+            self.after(
+                0,
+                lambda: messagebox.showerror(
+                    t("error", self.lang), f"{t('update_check_failed', self.lang)}: {err}"
+                ),
+            )
             self.after(0, lambda: self.update_btn.configure(state="normal"))
             return
 
         if release is None:
-            self.after(0, lambda: messagebox.showerror(
-                t("error", self.lang), t("update_check_failed", self.lang)
-            ))
+            self.after(
+                0,
+                lambda: messagebox.showerror(
+                    t("error", self.lang), t("update_check_failed", self.lang)
+                ),
+            )
             self.after(0, lambda: self.update_btn.configure(state="normal"))
             return
 
         if not is_newer(release.version):
-            self.after(0, lambda: messagebox.showinfo(
-                "vid2dataset", t("update_latest", self.lang)
-            ))
+            self.after(0, lambda: messagebox.showinfo("vid2dataset", t("update_latest", self.lang)))
             self.after(0, lambda: self.update_btn.configure(state="normal"))
             return
 
@@ -439,9 +524,9 @@ class App(ctk.CTk):
         from vid2dataset.updater import download_exe, install_update
 
         if not release.exe_url:
-            self.after(0, lambda: messagebox.showerror(
-                t("error", self.lang), "No .exe asset in release."
-            ))
+            self.after(
+                0, lambda: messagebox.showerror(t("error", self.lang), "No .exe asset in release.")
+            )
             self.after(0, lambda: self.update_btn.configure(state="normal"))
             return
 
@@ -449,32 +534,37 @@ class App(ctk.CTk):
         self.after(0, lambda: self.progress.start())
 
         import sys
+
         target = Path(sys.executable).parent / "vid2dataset_new.exe"
 
         def progress_cb(done: int, total: int) -> None:
             if total > 0:
                 pct = done * 100 // total
-                self.after(0, lambda p=pct: self.status_var.set(
-                    f"{t('update_downloading', self.lang)} {p}%"
-                ))
+                self.after(
+                    0,
+                    lambda p=pct: self.status_var.set(f"{t('update_downloading', self.lang)} {p}%"),
+                )
 
         try:
             download_exe(release.exe_url, target, progress_cb=progress_cb)
         except Exception as exc:
             err = str(exc)
             self.after(0, lambda: self.progress.stop())
-            self.after(0, lambda: messagebox.showerror(
-                t("error", self.lang), f"Download failed: {err}"
-            ))
+            self.after(
+                0, lambda: messagebox.showerror(t("error", self.lang), f"Download failed: {err}")
+            )
             self.after(0, lambda: self.update_btn.configure(state="normal"))
             return
 
         self.after(0, lambda: self.progress.stop())
         self.after(0, lambda: self.status_var.set(t("update_ready", self.lang)))
-        self.after(0, lambda: messagebox.showinfo(
-            "vid2dataset",
-            t("update_ready", self.lang) + "\n\nThe app will now restart.",
-        ))
+        self.after(
+            0,
+            lambda: messagebox.showinfo(
+                "vid2dataset",
+                t("update_ready", self.lang) + "\n\nThe app will now restart.",
+            ),
+        )
 
         try:
             install_update(target)
@@ -482,9 +572,9 @@ class App(ctk.CTk):
             self.after(500, self.destroy)
         except Exception as exc:
             err = str(exc)
-            self.after(0, lambda: messagebox.showerror(
-                t("error", self.lang), f"Install failed: {err}"
-            ))
+            self.after(
+                0, lambda: messagebox.showerror(t("error", self.lang), f"Install failed: {err}")
+            )
             self.after(0, lambda: self.update_btn.configure(state="normal"))
 
     def _toggle_lang(self) -> None:
@@ -572,21 +662,30 @@ class App(ctk.CTk):
 
         try:
             base = load_preset(self.preset_var.get()) if self.preset_var.get() in PRESETS else {}
-            base.update({
-                "input": Path(inp), "output": Path(out),
-                "auto_quality": self.auto_quality_var.get(),
-                "decode_mode": "keyframe" if self.keyframe_var.get() else "accurate",
-                "subject_size_filter": self.subject_var.get(),
-                "detect_watermark": self.watermark_var.get(),
-                "crop_watermark": self.crop_wm_var.get(),
-                "flatten_output": self.flatten_var.get(),
-                "gpu_accel": self.gpu_var.get(),
-            })
+            base.update(
+                {
+                    "input": Path(inp),
+                    "output": Path(out),
+                    "auto_quality": self.auto_quality_var.get(),
+                    "decode_mode": "keyframe" if self.keyframe_var.get() else "accurate",
+                    "subject_size_filter": self.subject_var.get(),
+                    "detect_watermark": self.watermark_var.get(),
+                    "crop_watermark": self.crop_wm_var.get(),
+                    "flatten_output": self.flatten_var.get(),
+                    "gpu_accel": self.gpu_var.get(),
+                }
+            )
             for key, entry in self._params.items():
                 val = entry.get().strip()
                 if not val:
                     continue
-                if key in ("resolution", "max_per_video", "min_per_video", "phash_distance", "frames_per_scene"):
+                if key in (
+                    "resolution",
+                    "max_per_video",
+                    "min_per_video",
+                    "phash_distance",
+                    "frames_per_scene",
+                ):
                     parsed = int(val)
                     if key == "max_per_video" and parsed <= 0:
                         continue
@@ -598,6 +697,7 @@ class App(ctk.CTk):
 
             # ETA: count videos first
             from vid2dataset.io_utils import discover_videos
+
             videos = discover_videos(cfg.input)
             total_videos = len(videos)
             video_times: list[float] = []
@@ -615,24 +715,41 @@ class App(ctk.CTk):
                         remaining = avg * (total_videos - current - 1)
                         mins, secs = divmod(int(remaining), 60)
                         eta_str = f"{mins}m {secs}s" if mins else f"{secs}s"
-                        self.after(0, lambda s=eta_str, c=current: self.status_var.set(
-                            t("processing", self.lang, name=Path(videos[c]).stem[:20], current=c + 1, total=total_videos)
-                            + "  " + t("eta", self.lang, remaining=s)
-                        ))
+                        self.after(
+                            0,
+                            lambda s=eta_str, c=current: self.status_var.set(
+                                t(
+                                    "processing",
+                                    self.lang,
+                                    name=Path(videos[c]).stem[:20],
+                                    current=c + 1,
+                                    total=total_videos,
+                                )
+                                + "  "
+                                + t("eta", self.lang, remaining=s)
+                            ),
+                        )
                     else:
-                        self.after(0, lambda c=current: self.status_var.set(
-                            t("processing", self.lang, name=Path(videos[c]).stem[:20], current=c + 1, total=total_videos)
-                        ))
+                        self.after(
+                            0,
+                            lambda c=current: self.status_var.set(
+                                t(
+                                    "processing",
+                                    self.lang,
+                                    name=Path(videos[c]).stem[:20],
+                                    current=c + 1,
+                                    total=total_videos,
+                                )
+                            ),
+                        )
 
             result = run_pipeline(cfg, progress=progress_cb, cancel_event=self._cancel_event)
 
             done_msg = t("done", self.lang, count=result.total_written, time=result.elapsed_s)
             self.after(0, lambda: self.status_var.set(done_msg))
-            self.after(0, lambda: self._log(f"\n{'='*50}\n{done_msg}"))
+            self.after(0, lambda: self._log(f"\n{'=' * 50}\n{done_msg}"))
             for vs in result.videos:
-                self.after(0, lambda v=vs: self._log(
-                    f"  {Path(v.video).name}: {v.written} kept"
-                ))
+                self.after(0, lambda v=vs: self._log(f"  {Path(v.video).name}: {v.written} kept"))
             self.after(0, lambda: self.open_btn.configure(state="normal"))
 
         except Exception as exc:
