@@ -730,6 +730,11 @@ def run_pipeline(
                 trigger_word=cfg.trigger_word,
                 general_threshold=cfg.tag_general_threshold,
                 character_threshold=cfg.tag_character_threshold,
+                blacklist=cfg.tag_blacklist,
+                always=cfg.tag_always,
+                trait_prune_threshold=cfg.trait_prune_threshold,
+                require=cfg.tag_require,
+                exclude=cfg.tag_exclude,
                 progress_cb=(
                     (lambda stage, done, total: progress(f"tag:{stage}", done, total))
                     if progress
@@ -746,8 +751,21 @@ def run_pipeline(
                 "trigger_word": " ".join(cfg.trigger_word.split()),
                 "model": cfg.tagger_model,
                 "top_tags": ts.tag_counts.most_common(30),
+                "rejected_by_tags": len(ts.rejected),
+                "pruned_tags": ts.pruned_tags,
             }
-            log.info("Tagged %d/%d images (%d failed)", ts.tagged, ts.total, ts.failed)
+            if ts.rejected:
+                # Rejected images were moved to _rejected/ — drop them from
+                # the gallery / contact sheet inputs so links stay live.
+                rejected_abs = {(cfg.output / r).resolve() for r in ts.rejected}
+                all_image_paths = [p for p in all_image_paths if p.resolve() not in rejected_abs]
+            log.info(
+                "Tagged %d/%d images (%d failed, %d rejected by tag rules)",
+                ts.tagged,
+                ts.total,
+                ts.failed,
+                len(ts.rejected),
+            )
         except Exception as e:  # noqa: BLE001
             log.error("Tagging pass failed: %s", e)
             tag_info = {"error": str(e)}

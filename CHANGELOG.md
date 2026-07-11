@@ -4,6 +4,28 @@ All notable changes to vid2dataset are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning is [SemVer](https://semver.org/).
 
+## [1.1.0] - 2026-07-11
+
+### Added — caption quality controls
+
+- **Tag blacklist** (`tag_blacklist`, GUI "Blacklist"): tags never written
+  into captions (image kept). Accepts `long_hair` or `long hair` forms.
+- **Always-tags** (`tag_always`, config/CLI): tags written right after the
+  trigger word in every caption (e.g. `anime screencap`).
+- **Trait pruning** (`trait_prune_threshold`, GUI "Prune ≥"): tags present in
+  ≥ N% of tagged images are removed from ALL captions, so the trigger word
+  absorbs the character's constant traits — the standard character-LoRA
+  practice, now automatic. Pruned tags are listed in `_report.html`.
+- **Tag-based image filtering** (`tag_require` / `tag_exclude`, GUI
+  "Require" / "Reject if"): images missing a required tag (e.g. `1girl`) or
+  having an excluded tag (e.g. `multiple girls`) are MOVED to
+  `output/_rejected/` — the tagger's understanding of each frame now curates
+  the dataset, killing multi-character pollution from gameplay/anime sources.
+  Stale sidecars move along with the image; gallery/contact sheet drop the
+  rejected entries; counts appear in report + CLI.
+- All five controls available on `vid2dataset tag` too (`--blacklist`,
+  `--always`, `--prune-threshold`, `--require`, `--exclude`).
+
 ## [1.0.0] - 2026-07-11
 
 ### Added

@@ -364,6 +364,27 @@ def tag(
     character_threshold: Annotated[
         float, typer.Option("--character-threshold", help="Character tag threshold.")
     ] = 0.85,
+    blacklist: Annotated[
+        str, typer.Option("--blacklist", help="Comma-separated tags never written to captions.")
+    ] = "",
+    always: Annotated[
+        str, typer.Option("--always", help="Comma-separated tags added after the trigger word.")
+    ] = "",
+    prune_threshold: Annotated[
+        float,
+        typer.Option(
+            "--prune-threshold",
+            help="Remove tags present in at least this fraction of images (0 = off).",
+        ),
+    ] = 0.0,
+    require: Annotated[
+        str,
+        typer.Option("--require", help="Images missing any of these tags move to _rejected/."),
+    ] = "",
+    exclude: Annotated[
+        str,
+        typer.Option("--exclude", help="Images having any of these tags move to _rejected/."),
+    ] = "",
     cpu: Annotated[bool, typer.Option("--cpu", help="Force CPU inference.")] = False,
 ) -> None:
     """Write WD-tagger caption .txt sidecars for an existing image folder.
@@ -412,6 +433,11 @@ def tag(
             trigger_word=trigger,
             general_threshold=threshold,
             character_threshold=character_threshold,
+            blacklist=blacklist,
+            always=always,
+            trait_prune_threshold=prune_threshold,
+            require=require,
+            exclude=exclude,
             use_gpu=not cpu,
             progress_cb=cb,
         )
@@ -419,6 +445,13 @@ def tag(
     console.print(
         f"[green]Done:[/] {summary.tagged} tagged, {summary.failed} failed (of {summary.total})."
     )
+    if summary.rejected:
+        console.print(
+            f"[yellow]{len(summary.rejected)} image(s) moved to _rejected/[/] "
+            f"by --require/--exclude rules."
+        )
+    if summary.pruned_tags:
+        console.print(f"[dim]Pruned constant traits:[/] {', '.join(summary.pruned_tags)}")
     if summary.tag_counts:
         top = ", ".join(f"{t} ({c})" for t, c in summary.tag_counts.most_common(10))
         console.print(f"[dim]Top tags:[/] {top}")

@@ -81,6 +81,16 @@ class App(ctk.CTk):
             "wd-swinv2-tagger-v3",
         ):
             self.tagger_model_var.set(str(self.prefs["tagger_model"]))
+        for pref_key, entry in (
+            ("tag_blacklist", self.blacklist_entry),
+            ("tag_require", self.require_entry),
+            ("tag_exclude", self.exclude_entry),
+        ):
+            if self.prefs.get(pref_key):
+                entry.insert(0, str(self.prefs[pref_key]))
+        if self.prefs.get("trait_prune_threshold"):
+            self.prune_entry.delete(0, "end")
+            self.prune_entry.insert(0, str(self.prefs["trait_prune_threshold"]))
 
     def _build(self) -> None:
         self.title(f"vid2dataset {__version__}")
@@ -267,6 +277,39 @@ class App(ctk.CTk):
             values=["wd-eva02-large-tagger-v3", "wd-swinv2-tagger-v3"],
         )
         self.tagger_model_menu.pack(side="left")
+
+        # Tagging row 2: caption-quality controls (v1.1)
+        tagrow2 = ctk.CTkFrame(settings, fg_color="transparent")
+        tagrow2.grid(row=5, column=0, columnspan=4, padx=8, pady=(0, 10), sticky="w")
+        self.blacklist_lbl = ctk.CTkLabel(
+            tagrow2, text=t("tag_blacklist", self.lang), font=ctk.CTkFont(size=11)
+        )
+        self.blacklist_lbl.pack(side="left", padx=(4, 4))
+        self.blacklist_entry = ctk.CTkEntry(tagrow2, width=170)
+        self.blacklist_entry.pack(side="left", padx=(0, 10))
+        Tooltip(self.blacklist_entry, lambda: t("tip_tag_blacklist", self.lang), wraplength=380)
+        self.require_lbl = ctk.CTkLabel(
+            tagrow2, text=t("tag_require", self.lang), font=ctk.CTkFont(size=11)
+        )
+        self.require_lbl.pack(side="left", padx=(0, 4))
+        self.require_entry = ctk.CTkEntry(tagrow2, width=110)
+        self.require_entry.pack(side="left", padx=(0, 10))
+        Tooltip(self.require_entry, lambda: t("tip_tag_require", self.lang), wraplength=380)
+        self.exclude_lbl = ctk.CTkLabel(
+            tagrow2, text=t("tag_exclude", self.lang), font=ctk.CTkFont(size=11)
+        )
+        self.exclude_lbl.pack(side="left", padx=(0, 4))
+        self.exclude_entry = ctk.CTkEntry(tagrow2, width=140)
+        self.exclude_entry.pack(side="left", padx=(0, 10))
+        Tooltip(self.exclude_entry, lambda: t("tip_tag_exclude", self.lang), wraplength=380)
+        self.prune_lbl = ctk.CTkLabel(
+            tagrow2, text=t("trait_prune", self.lang), font=ctk.CTkFont(size=11)
+        )
+        self.prune_lbl.pack(side="left", padx=(0, 4))
+        self.prune_entry = ctk.CTkEntry(tagrow2, width=50)
+        self.prune_entry.insert(0, "0")
+        self.prune_entry.pack(side="left")
+        Tooltip(self.prune_entry, lambda: t("tip_trait_prune", self.lang), wraplength=380)
 
         # Run
         run_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -719,6 +762,10 @@ class App(ctk.CTk):
         self.chk_flatten.configure(text=t("flatten_output", self.lang))
         self.chk_tag.configure(text=t("tag_images", self.lang))
         self.trigger_lbl.configure(text=t("trigger_word", self.lang))
+        self.blacklist_lbl.configure(text=t("tag_blacklist", self.lang))
+        self.require_lbl.configure(text=t("tag_require", self.lang))
+        self.exclude_lbl.configure(text=t("tag_exclude", self.lang))
+        self.prune_lbl.configure(text=t("trait_prune", self.lang))
         # Refresh all parameter labels
         for key, lbl in self._param_labels.items():
             lbl.configure(text=t(key, self.lang))
@@ -769,6 +816,10 @@ class App(ctk.CTk):
                 "preset": self.preset_var.get(),
                 "trigger_word": self.trigger_entry.get().strip(),
                 "tagger_model": self.tagger_model_var.get(),
+                "tag_blacklist": self.blacklist_entry.get().strip(),
+                "tag_require": self.require_entry.get().strip(),
+                "tag_exclude": self.exclude_entry.get().strip(),
+                "trait_prune_threshold": self.prune_entry.get().strip(),
             }
         )
         _save_prefs(self.prefs)
@@ -805,8 +856,17 @@ class App(ctk.CTk):
                     "tag_images": self.tag_var.get(),
                     "trigger_word": self.trigger_entry.get().strip(),
                     "tagger_model": self.tagger_model_var.get(),
+                    "tag_blacklist": self.blacklist_entry.get().strip(),
+                    "tag_require": self.require_entry.get().strip(),
+                    "tag_exclude": self.exclude_entry.get().strip(),
                 }
             )
+            prune_raw = self.prune_entry.get().strip()
+            try:
+                prune_val = float(prune_raw) if prune_raw else 0.0
+            except ValueError:
+                prune_val = 0.0
+            base["trait_prune_threshold"] = min(1.0, max(0.0, prune_val))
             for key, entry in self._params.items():
                 val = entry.get().strip()
                 if not val:

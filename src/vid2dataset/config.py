@@ -314,6 +314,34 @@ class ExtractConfig(BaseModel):
         description="If >0 (and flatten_output is on), images land in a "
         "'<N>_<trigger>' subfolder — the kohya-ss repeats folder convention.",
     )
+    tag_blacklist: str = Field(
+        "",
+        description="Comma-separated tags never written into captions "
+        "(the image itself is kept). Accepts 'long_hair' or 'long hair'.",
+    )
+    tag_always: str = Field(
+        "",
+        description="Comma-separated tags written right after the trigger "
+        "word in every caption (e.g. 'anime screencap').",
+    )
+    trait_prune_threshold: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="If >0, tags present in at least this fraction of tagged "
+        "images are removed from ALL captions so the trigger word absorbs "
+        "the constant traits (character-LoRA practice). 0 = off.",
+    )
+    tag_require: str = Field(
+        "",
+        description="Comma-separated tags an image MUST all have; otherwise "
+        "it is moved to output/_rejected/ (e.g. '1girl').",
+    )
+    tag_exclude: str = Field(
+        "",
+        description="Comma-separated tags; an image having ANY of them is "
+        "moved to output/_rejected/ (e.g. 'multiple girls, 2boys').",
+    )
 
     # ── Gallery output ───────────────────────────────────────────────
     contact_sheet: bool = Field(

@@ -143,13 +143,30 @@ def _tagging_section(tagging: dict | None) -> str:
     )
     trigger = tagging.get("trigger_word") or "&mdash;"
     cancelled = " &middot; cancelled early" if tagging.get("cancelled") else ""
+    rejected = int(tagging.get("rejected_by_tags", 0) or 0)
+    rejected_html = (
+        f'<span class="stat"><span class="l">Rejected by tag rules</span>'
+        f'<span class="v">{rejected}</span></span>'
+        if rejected
+        else ""
+    )
+    pruned = tagging.get("pruned_tags") or []
+    pruned_html = (
+        "<p class='info'>Pruned constant traits (absorbed by the trigger word): "
+        + html.escape(", ".join(str(p) for p in pruned))
+        + "</p>"
+        if pruned
+        else ""
+    )
     return f"""<h2>Auto-tagging</h2>
 <div>
   <span class="stat"><span class="l">Tagged</span><span class="v">{int(tagging.get("tagged", 0))}</span></span>
   <span class="stat"><span class="l">Failed</span><span class="v">{int(tagging.get("failed", 0))}</span></span>
   <span class="stat"><span class="l">Trigger word</span><span class="v">{html.escape(str(trigger))}</span></span>
+  {rejected_html}
 </div>
 <p class="info">Model: {html.escape(str(tagging.get("model", "")))}{cancelled} &middot; most frequent tags:</p>
+{pruned_html}
 {table}"""
 
 

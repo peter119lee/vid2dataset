@@ -200,6 +200,74 @@ def test_collect_images_skips_artifacts(tmp_path) -> None:
     assert names == ["a.png", "b.jpg"]
 
 
+def test_parse_tag_list_normalizes() -> None:
+    from vid2dataset.tagger import _parse_tag_list
+
+    assert _parse_tag_list("long_hair, Long Hair, , watermark") == ["long hair", "watermark"]
+    assert _parse_tag_list("^_^") == ["^_^"]
+    assert _parse_tag_list("") == []
+
+
+def test_compose_caption_always_and_drop() -> None:
+    caption = compose_caption(
+        "mychar",
+        [("hatsune_miku", 0.99)],
+        [("1girl", 0.9), ("long_hair", 0.8)],
+        always=["anime screencap"],
+        drop={"long hair"},
+    )
+    # always follows the trigger; drop filters model tags only.
+    assert caption == "mychar, anime screencap, hatsune miku, 1girl"
+
+
+def test_tag_folder_blacklist_removes_tokens(tmp_path) -> None:
+    _write_png(tmp_path / "a.png")
+    summary = tag_folder(
+        tmp_path, trigger_word="mychar", blacklist="long_hair", tagger=_fake_tagger()
+    )
+    caption = (tmp_path / "a.txt").read_text(encoding="utf-8").strip()
+    assert caption == "mychar, hatsune miku, 1girl"
+    assert "long hair" not in summary.tag_counts
+
+
+def test_tag_folder_require_rejects_and_moves(tmp_path) -> None:
+    _write_png(tmp_path / "a.png")
+    summary = tag_folder(tmp_path, trigger_word="mychar", require="2girls", tagger=_fake_tagger())
+    # The fake tagger never emits 2girls -> image moves to _rejected/.
+    assert summary.tagged == 0
+    assert summary.failed == 0
+    assert summary.rejected == ["a.png"]
+    assert not (tmp_path / "a.png").exists()
+    assert (tmp_path / "_rejected" / "a.png").exists()
+    assert not (tmp_path / "_rejected" / "a.txt").exists()  # no sidecar for rejects
+
+
+def test_tag_folder_require_pass_keeps_image(tmp_path) -> None:
+    _write_png(tmp_path / "a.png")
+    summary = tag_folder(tmp_path, trigger_word="m", require="1girl", tagger=_fake_tagger())
+    assert summary.tagged == 1
+    assert summary.rejected == []
+
+
+def test_tag_folder_exclude_rejects(tmp_path) -> None:
+    _write_png(tmp_path / "a.png")
+    summary = tag_folder(tmp_path, exclude="1girl", tagger=_fake_tagger())
+    assert summary.rejected == ["a.png"]
+    assert (tmp_path / "_rejected" / "a.png").exists()
+
+
+def test_tag_folder_trait_pruning(tmp_path) -> None:
+    _write_png(tmp_path / "a.png")
+    _write_png(tmp_path / "b.png")
+    # The fake tagger emits identical tags for every image -> 100% frequency.
+    summary = tag_folder(
+        tmp_path, trigger_word="mychar", trait_prune_threshold=0.9, tagger=_fake_tagger()
+    )
+    caption = (tmp_path / "a.txt").read_text(encoding="utf-8").strip()
+    assert caption == "mychar"  # every constant trait absorbed by the trigger
+    assert set(summary.pruned_tags) == {"hatsune miku", "1girl", "long hair"}
+
+
 def test_tag_folder_cancel_writes_no_fake_captions(tmp_path) -> None:
     # Regression: a cancelled run must NOT stamp trigger-only sidecars onto
     # images the model never saw (they would poison the training set).

@@ -378,6 +378,11 @@ Drop the folder straight into kohya / OneTrainer.
 | `tag_general_threshold` | 0.35 | Lower = more (noisier) tags. 0.25-0.30 for style LoRAs wanting rich captions. |
 | `tag_character_threshold` | 0.85 | Keep high — false character tags actively hurt training. |
 | `kohya_repeats` | 0 (off) | With **Flatten output**: images land in `output/<N>_<trigger>/` (kohya dreambooth folder convention). |
+| `tag_blacklist` | *(empty)* | Tags never written into captions (image kept). Ex: `watermark, signature, blurry` |
+| `tag_always` | *(empty)* | Tags added right after the trigger in every caption. Ex: `anime screencap` |
+| `trait_prune_threshold` | 0 (off) | Tags present in ≥ this fraction of images are removed from ALL captions — the trigger absorbs constant traits. 0.8 is a good character-LoRA start. |
+| `tag_require` | *(empty)* | Image must have ALL of these tags or it moves to `_rejected/`. Ex: `1girl` |
+| `tag_exclude` | *(empty)* | Image having ANY of these moves to `_rejected/`. Ex: `multiple girls, 2boys` |
 
 **First enable** downloads the model + onnxruntime (~25 MB) once to
 `%LOCALAPPDATA%/vid2dataset/`. Inference uses DirectML — GPU-accelerated on any

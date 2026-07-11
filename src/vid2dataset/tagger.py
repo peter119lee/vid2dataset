@@ -25,7 +25,8 @@ import logging
 import os
 import threading
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -112,16 +113,40 @@ def format_tag(tag: str) -> str:
     return tag.replace("_", " ")
 
 
+def _parse_tag_list(raw: str) -> list[str]:
+    """User-supplied comma-separated tags -> normalized caption tokens.
+
+    Accepts both booru form (``long_hair``) and caption form (``long hair``);
+    entries go through format_tag and are deduplicated case-insensitively,
+    order preserved.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in raw.split(","):
+        token = format_tag(" ".join(part.split()))
+        key = token.lower()
+        if not token or key in seen:
+            continue
+        seen.add(key)
+        out.append(token)
+    return out
+
+
 def compose_caption(
     trigger_word: str,
     character_tags: list[tuple[str, float]],
     general_tags: list[tuple[str, float]],
+    *,
+    always: Sequence[str] = (),
+    drop: AbstractSet[str] = frozenset(),
 ) -> str:
-    """Build a single-line caption: trigger, character tags, general tags.
+    """Build a single-line caption: trigger, always-tags, character, general.
 
     Tags arrive (name, confidence) sorted by confidence descending. The
     result is guaranteed single-line and case-insensitively deduplicated
     (first occurrence wins, so the trigger word is never repeated as a tag).
+    ``drop`` (lowercase formatted tokens) filters MODEL tags only — the
+    trigger word and ``always`` tokens can never be dropped.
     """
     # Collapse any whitespace (incl. newlines) the user typed into the trigger.
     trigger = " ".join(trigger_word.split())
@@ -130,10 +155,15 @@ def compose_caption(
     if trigger:
         parts.append(trigger)
         seen.add(trigger.lower())
+    for token in always:
+        key = token.lower()
+        if token and key not in seen:
+            seen.add(key)
+            parts.append(token)
     for name, _conf in [*character_tags, *general_tags]:
         token = format_tag(name)
         key = token.lower()
-        if key in seen:
+        if key in seen or key in drop:
             continue
         seen.add(key)
         parts.append(token)
@@ -569,6 +599,10 @@ class TagSummary:
     failed: int = 0
     total: int = 0
     cancelled: bool = False
+    rejected: list[str] = field(default_factory=list)
+    """relative paths moved to _rejected/ by tag_require / tag_exclude."""
+    pruned_tags: list[str] = field(default_factory=list)
+    """tokens removed from every caption by trait_prune_threshold."""
     tag_counts: Counter = field(default_factory=Counter)
     per_image: dict[str, list[str]] = field(default_factory=dict)
     """relative image path -> formatted caption tokens (for gallery/report)."""
@@ -590,6 +624,11 @@ def tag_folder(
     trigger_word: str = "",
     general_threshold: float = 0.35,
     character_threshold: float = 0.85,
+    blacklist: str = "",
+    always: str = "",
+    trait_prune_threshold: float = 0.0,
+    require: str = "",
+    exclude: str = "",
     use_gpu: bool = True,
     download_if_missing: bool = True,
     progress_cb: ProgressCallback | None = None,
@@ -597,6 +636,16 @@ def tag_folder(
     tagger: WDTagger | None = None,
 ) -> TagSummary:
     """Tag every image under ``folder`` and write .txt sidecars beside them.
+
+    Caption-quality controls (all comma-separated tag lists accept booru or
+    caption form):
+    - ``blacklist``: tags removed from captions (image is kept).
+    - ``always``: tags written right after the trigger word in every caption.
+    - ``trait_prune_threshold``: if > 0, tags present in at least this
+      fraction of tagged images are removed from ALL captions so the trigger
+      word absorbs the constant traits (character-LoRA practice).
+    - ``require`` / ``exclude``: images missing any required tag, or having
+      any excluded tag, are MOVED to ``<folder>/_rejected/`` (no sidecar).
 
     ``tagger`` is injectable for tests; by default this ensures onnxruntime
     (via tagger_runtime) and the model files, then runs WDTagger.
@@ -626,6 +675,28 @@ def tag_folder(
         )
 
     results = tagger.tag_paths(images, progress_cb=progress_cb, cancel_event=cancel_event)
+
+    always_tokens = _parse_tag_list(always)
+    blacklist_set = {t.lower() for t in _parse_tag_list(blacklist)}
+    require_set = {t.lower() for t in _parse_tag_list(require)}
+    exclude_set = {t.lower() for t in _parse_tag_list(exclude)}
+
+    # Trait pruning: tokens present in >= threshold of the successfully
+    # tagged images are constants — drop them from every caption.
+    pruned: set[str] = set()
+    if trait_prune_threshold > 0:
+        ok_results = [r for r in results if not r.error]
+        freq: Counter = Counter()
+        for r in ok_results:
+            freq.update({format_tag(n).lower() for n, _ in [*r.character, *r.general]})
+        n_ok = len(ok_results)
+        pruned = {tok for tok, c in freq.items() if n_ok and c / n_ok >= trait_prune_threshold}
+    summary.pruned_tags = sorted(pruned)
+    drop = blacklist_set | pruned
+
+    rejected_root = folder / "_rejected"
+    trigger_lower = " ".join(trigger_word.split()).lower()
+
     for image_path, tags in zip(images, results, strict=True):
         if tags.error == "cancelled":
             # Never reached the model (user cancelled): writing a sidecar here
@@ -634,7 +705,25 @@ def tag_folder(
         if tags.error:
             summary.failed += 1
             continue
-        caption = compose_caption(trigger_word, tags.character, tags.general)
+        rel = image_path.relative_to(folder).as_posix()
+        token_set = {format_tag(n).lower() for n, _ in [*tags.character, *tags.general]}
+        if (require_set and not require_set <= token_set) or (exclude_set & token_set):
+            target = rejected_root / image_path.relative_to(folder)
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                image_path.replace(target)
+                # Take any stale sidecar from a previous run along with it.
+                old_txt = image_path.with_suffix(".txt")
+                if old_txt.exists():
+                    old_txt.replace(target.with_suffix(".txt"))
+                summary.rejected.append(rel)
+            except OSError as e:
+                log.error("Could not move rejected image %s: %s", image_path, e)
+                summary.failed += 1
+            continue
+        caption = compose_caption(
+            trigger_word, tags.character, tags.general, always=always_tokens, drop=drop
+        )
         if not caption:
             summary.failed += 1
             continue
@@ -646,11 +735,9 @@ def tag_folder(
             continue
         summary.tagged += 1
         tokens = [t for t in caption.split(", ") if t]
-        rel = image_path.relative_to(folder).as_posix()
         summary.per_image[rel] = tokens
         # Frequency counts exclude the trigger word (it is on every image).
-        trigger = " ".join(trigger_word.split()).lower()
-        summary.tag_counts.update(t for t in tokens if t.lower() != trigger)
+        summary.tag_counts.update(t for t in tokens if t.lower() != trigger_lower)
 
     summary.cancelled = bool(cancel_event is not None and cancel_event.is_set())
     return summary
