@@ -60,6 +60,8 @@ class App(ctk.CTk):
         self._running = False
         self._downloading_tagger = False
         self._cancel_event: threading.Event | None = None
+        self.advanced_segments: dict[str, list[tuple[float, float]]] = {}
+        self._advanced_win = None
         self._build()
         self._apply_preset(self.prefs.get("preset", "anima-style"))
         # Restore paths
@@ -345,6 +347,15 @@ class App(ctk.CTk):
             state="disabled",
         )
         self.open_btn.grid(row=0, column=3, padx=(12, 0))
+        self.adv_btn = ctk.CTkButton(
+            run_frame,
+            text=t("advanced", self.lang),
+            width=110,
+            command=self._open_advanced,
+            fg_color="#3a5a8b",
+            hover_color="#48699e",
+        )
+        self.adv_btn.grid(row=0, column=4, padx=(8, 0))
 
         # Status
         self.status_var = ctk.StringVar(value=t("ready", self.lang))
@@ -388,6 +399,27 @@ class App(ctk.CTk):
         if p:
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, p)
+
+    def _open_advanced(self) -> None:
+        """Open (or focus) the Advanced mode window: segments + manual capture."""
+        if self._advanced_win is not None and self._advanced_win.winfo_exists():
+            self._advanced_win.lift()
+            self._advanced_win.focus()
+            return
+        inp = self.input_entry.get().strip()
+        if not inp or not Path(inp).exists():
+            messagebox.showerror(t("error", self.lang), t("no_input", self.lang))
+            return
+        from vid2dataset.advanced import AdvancedWindow
+
+        out = self.output_entry.get().strip() or "output"
+        self._advanced_win = AdvancedWindow(
+            self,
+            input_dir=Path(inp),
+            segments=self.advanced_segments,
+            build_config=lambda: self._build_config(inp, out),
+            lang=self.lang,
+        )
 
     def _on_tag_toggle(self) -> None:
         """Called when the Auto-tag checkbox is ticked.
@@ -754,6 +786,7 @@ class App(ctk.CTk):
         self.run_btn.configure(text=t("extract", self.lang))
         self.cancel_btn.configure(text=t("cancel", self.lang))
         self.open_btn.configure(text=t("open_output", self.lang))
+        self.adv_btn.configure(text=t("advanced", self.lang))
         self.chk_auto.configure(text=t("auto_quality", self.lang))
         self.chk_kf.configure(text=t("keyframe", self.lang))
         self.chk_subj.configure(text=t("subject_size", self.lang))
@@ -835,57 +868,71 @@ class App(ctk.CTk):
         self.log_box.configure(state="disabled")
         threading.Thread(target=self._worker, args=(inp, out), daemon=True).start()
 
+    def _build_config(self, inp: str, out: str) -> ExtractConfig:
+        """Assemble an ExtractConfig from the current GUI state.
+
+        Shared by the extraction worker and the Advanced window's manual
+        capture (which must write through the exact same crop/bucket path).
+        """
+        base = load_preset(self.preset_var.get()) if self.preset_var.get() in PRESETS else {}
+        base.update(
+            {
+                "input": Path(inp),
+                "output": Path(out),
+                "auto_quality": self.auto_quality_var.get(),
+                "decode_mode": "keyframe" if self.keyframe_var.get() else "accurate",
+                "subject_size_filter": self.subject_var.get(),
+                "detect_watermark": self.watermark_var.get(),
+                "crop_watermark": self.crop_wm_var.get(),
+                "flatten_output": self.flatten_var.get(),
+                "gpu_accel": self.gpu_var.get(),
+                "tag_images": self.tag_var.get(),
+                "trigger_word": self.trigger_entry.get().strip(),
+                "tagger_model": self.tagger_model_var.get(),
+                "tag_blacklist": self.blacklist_entry.get().strip(),
+                "tag_require": self.require_entry.get().strip(),
+                "tag_exclude": self.exclude_entry.get().strip(),
+            }
+        )
+        prune_raw = self.prune_entry.get().strip()
+        try:
+            prune_val = float(prune_raw) if prune_raw else 0.0
+        except ValueError:
+            prune_val = 0.0
+        base["trait_prune_threshold"] = min(1.0, max(0.0, prune_val))
+        for key, entry in self._params.items():
+            val = entry.get().strip()
+            if not val:
+                continue
+            if key in (
+                "resolution",
+                "max_per_video",
+                "min_per_video",
+                "phash_distance",
+                "frames_per_scene",
+            ):
+                parsed = int(val)
+                if key == "max_per_video" and parsed <= 0:
+                    continue
+                base[key] = parsed
+            elif key in ("blur_threshold", "ssim_threshold", "color_distance"):
+                base[key] = float(val)
+        # Segments marked in the Advanced window apply to the next run.
+        if self.advanced_segments:
+            base["segments"] = {
+                name: [list(seg) for seg in segs]
+                for name, segs in self.advanced_segments.items()
+                if segs
+            }
+        return ExtractConfig(**base)
+
     def _worker(self, inp: str, out: str) -> None:
         handler = _LogHandler(self)
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.INFO)
 
         try:
-            base = load_preset(self.preset_var.get()) if self.preset_var.get() in PRESETS else {}
-            base.update(
-                {
-                    "input": Path(inp),
-                    "output": Path(out),
-                    "auto_quality": self.auto_quality_var.get(),
-                    "decode_mode": "keyframe" if self.keyframe_var.get() else "accurate",
-                    "subject_size_filter": self.subject_var.get(),
-                    "detect_watermark": self.watermark_var.get(),
-                    "crop_watermark": self.crop_wm_var.get(),
-                    "flatten_output": self.flatten_var.get(),
-                    "gpu_accel": self.gpu_var.get(),
-                    "tag_images": self.tag_var.get(),
-                    "trigger_word": self.trigger_entry.get().strip(),
-                    "tagger_model": self.tagger_model_var.get(),
-                    "tag_blacklist": self.blacklist_entry.get().strip(),
-                    "tag_require": self.require_entry.get().strip(),
-                    "tag_exclude": self.exclude_entry.get().strip(),
-                }
-            )
-            prune_raw = self.prune_entry.get().strip()
-            try:
-                prune_val = float(prune_raw) if prune_raw else 0.0
-            except ValueError:
-                prune_val = 0.0
-            base["trait_prune_threshold"] = min(1.0, max(0.0, prune_val))
-            for key, entry in self._params.items():
-                val = entry.get().strip()
-                if not val:
-                    continue
-                if key in (
-                    "resolution",
-                    "max_per_video",
-                    "min_per_video",
-                    "phash_distance",
-                    "frames_per_scene",
-                ):
-                    parsed = int(val)
-                    if key == "max_per_video" and parsed <= 0:
-                        continue
-                    base[key] = parsed
-                elif key in ("blur_threshold", "ssim_threshold", "color_distance"):
-                    base[key] = float(val)
-
-            cfg = ExtractConfig(**base)
+            cfg = self._build_config(inp, out)
 
             # ETA: count videos first
             from vid2dataset.io_utils import discover_videos

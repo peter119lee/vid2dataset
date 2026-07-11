@@ -43,6 +43,14 @@ Already have images? Caption any folder from the CLI:
 vid2dataset tag path/to/images --trigger mychar
 ```
 
+### Advanced mode / 进阶模式 (v1.2)
+
+One-click too blunt? Press **Advanced…**: scrub each video on a timeline, mark **Set In / Set Out** segments (the next run extracts only inside them), or step to the exact frame you want and **Capture** it directly through the same crop/bucket pipeline. / 一键太粗糙？按**进阶模式**：拖动时间轴、标记片段（下次提取只取片段内的帧），或逐帧找到你要的画面直接**截取**。
+
+```bash
+vid2dataset extract videos/ --segment "dance.mp4:30-95.5" --segment "dance.mp4:120-180"
+```
+
 ### Option C: From source / 从源码安装
 
 ```bash
@@ -99,6 +107,9 @@ Then `vid2dataset app` to launch the GUI, or `vid2dataset extract --help` for CL
 | Gallery with hover info | 畫廊滑鼠 hover 資訊 (v0.7) | |
 | Auto-tagging (WD tagger) | 自动打标 (v1.0) | .txt sidecars, kohya-ready, DirectML |
 | kohya repeats folder | kohya 资料夹结构 (v1.0) | `kohya_repeats` + flatten |
+| Caption quality controls | 标签质量控制 (v1.1) | blacklist / trait pruning / require / exclude |
+| Advanced mode: segment cut | 进阶模式：片段选取 (v1.2) | per-video time ranges, GUI + `--segment` |
+| Advanced mode: manual capture | 进阶模式：手动截取 (v1.2) | scrub + capture exact frames |
 | Contact sheet + HTML gallery | 缩略图总览 + HTML 画廊 | |
 | ETA estimation | 剩余时间预估 | |
 | Chinese/English UI | 中文/英文界面切换 | |

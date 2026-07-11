@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vid2dataset"
-version = "1.1.0"
+version = "1.2.0"
 description = "Smart video-to-image extractor for LoRA training sets, tuned for Anima/SDXL bucketing."
 readme = "README.md"
 requires-python = ">=3.10"

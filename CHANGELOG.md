@@ -4,6 +4,26 @@ All notable changes to vid2dataset are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning is [SemVer](https://semver.org/).
 
+## [1.2.0] - 2026-07-11
+
+### Added — Advanced mode (not just one click any more)
+
+- **Advanced… window** (new button next to Extract): scrub any input video
+  with a timeline slider and −10s/−1s/−1f/+1f/+1s/+10s step buttons.
+- **Segment cut**: mark [Set In] → [Set Out] time ranges per video; the next
+  Extract run samples ONLY inside the marked segments (works in scene,
+  interval, and keyframe modes). Also on the CLI:
+  `--segment "dance.mp4:30-95.5"` (repeatable), and as the `segments` config
+  field. Verified end-to-end with a real video: candidates outside the range
+  never enter the pipeline.
+- **Manual capture**: scrub to the exact frame you want and press
+  [Capture frame] — it is written immediately through the same
+  letterbox-crop → bucket-resize path as extracted frames
+  (`<video>_manual_00001.png`), deliberately skipping the quality/diversity
+  gates because you chose it. Captures live in the normal output folder, so
+  auto-tagging picks them up with everything else.
+- New `process_single_frame()` extractor API backing manual capture.
+
 ## [1.1.0] - 2026-07-11
 
 ### Added — caption quality controls

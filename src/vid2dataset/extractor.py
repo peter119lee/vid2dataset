@@ -173,6 +173,72 @@ def _resize_to_bucket(
     return out, bucket
 
 
+def _segments_for(cfg: ExtractConfig, video: Path) -> list[tuple[float, float]] | None:
+    """Normalized (start, end) second-ranges for this video, or None = whole video."""
+    segs = cfg.segments.get(video.name) or cfg.segments.get(str(video))
+    if not segs:
+        return None
+    clean = sorted((min(a, b), max(a, b)) for a, b in segs)
+    return clean or None
+
+
+def _in_segments(t: float, segs: list[tuple[float, float]]) -> bool:
+    return any(a <= t <= b for a, b in segs)
+
+
+def process_single_frame(
+    cfg: ExtractConfig,
+    frame_bgr: np.ndarray,
+    video: Path,
+    seq: int,
+) -> Path | None:
+    """Crop -> bucket-resize -> write ONE manually captured frame.
+
+    Backs the Advanced mode Capture button. Deliberately skips the quality /
+    diversity / dedup gates — the user picked this exact frame. Returns the
+    written path, or None when the frame can't be processed.
+    """
+    from vid2dataset.io_utils import write_image
+
+    buckets = generate_buckets(
+        resolution=cfg.resolution,
+        min_bucket=cfg.min_bucket,
+        max_bucket=cfg.max_bucket,
+        step=cfg.bucket_step,
+    )
+    if not buckets or frame_bgr is None or frame_bgr.size == 0:
+        return None
+
+    if cfg.detect_letterbox:
+        rect = detect_letterbox(
+            frame_bgr,
+            threshold=cfg.letterbox_threshold,
+            min_ratio=cfg.letterbox_min_ratio,
+        )
+        if rect is not None:
+            frame_bgr = frame_bgr[rect.y : rect.y + rect.h, rect.x : rect.x + rect.w]
+    if frame_bgr.size == 0:
+        return None
+
+    resized = _resize_to_bucket(frame_bgr, cfg, buckets)
+    if resized is None:
+        return None
+    out_img, _bucket = resized
+
+    out_dir = _output_dir_for(cfg, video)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{sanitize_stem(video.stem)}_manual_{seq:05d}"
+    out_path = out_dir / f"{stem}.{cfg.output_format}"
+    write_image(
+        out_img,
+        out_path,
+        fmt=cfg.output_format,
+        jpg_quality=cfg.jpg_quality,
+        webp_quality=cfg.webp_quality,
+    )
+    return out_path
+
+
 def _kohya_subdir(cfg: ExtractConfig) -> str | None:
     """kohya-ss repeats folder name ('10_mychar'), or None when not configured.
 
@@ -287,6 +353,12 @@ def _process_video(
             indices = list(range(0, meta.frame_count, step))
 
     indices = sorted(set(indices))
+
+    # Advanced mode: restrict to the user's marked time segments.
+    segments = _segments_for(cfg, video)
+    if segments and meta.fps > 0:
+        indices = [i for i in indices if _in_segments(i / meta.fps, segments)]
+
     if use_ffmpeg_keyframes:
         indices = []  # placeholder; ffmpeg path streams I-frames
 
@@ -371,6 +443,10 @@ def _process_video(
         if cancel_event is not None and cancel_event.is_set():
             log.info("Cancel requested, stopping %s", video.name)
             break
+        # Segment guard covers the ffmpeg keyframe stream (which ignores
+        # `indices`); the OpenCV path was already filtered above.
+        if segments and not _in_segments(idx / (meta.fps or 30), segments):
+            continue
         if progress and (n % 4 == 0):
             progress("decode", n, len(indices) if indices else 0)
 

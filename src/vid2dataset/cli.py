@@ -55,6 +55,24 @@ def main(
 # ── extract ───────────────────────────────────────────────────────────
 
 
+def _parse_segments(specs: list[str]) -> dict[str, list[tuple[float, float]]]:
+    """'name.mp4:30-95.5' specs -> {filename: [(start_s, end_s), ...]}."""
+    out: dict[str, list[tuple[float, float]]] = {}
+    for spec in specs:
+        name, sep, rng = spec.rpartition(":")
+        if not sep or "-" not in rng:
+            raise ValueError(f"{spec!r} (expected NAME.mp4:START-END)")
+        start_s, _, end_s = rng.partition("-")
+        try:
+            start, end = float(start_s), float(end_s)
+        except ValueError as e:
+            raise ValueError(f"{spec!r} (START/END must be numbers)") from e
+        if end <= start:
+            raise ValueError(f"{spec!r} (END must be after START)")
+        out.setdefault(name, []).append((start, end))
+    return out
+
+
 @app.command()
 def extract(  # noqa: PLR0913
     input: Annotated[
@@ -165,6 +183,14 @@ def extract(  # noqa: PLR0913
         bool,
         typer.Option("--no-skip-existing", help="Re-process videos even if stats.json exists."),
     ] = False,
+    segment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--segment",
+            help="Only extract inside a time range: 'NAME.mp4:START-END' in "
+            "seconds (e.g. 'dance.mp4:30-95.5'). Repeatable.",
+        ),
+    ] = None,
     log_level: Annotated[
         str, typer.Option("--log-level", help="DEBUG | INFO | WARNING | ERROR")
     ] = "INFO",
@@ -224,6 +250,12 @@ def extract(  # noqa: PLR0913
         overrides["html_gallery"] = False
     if no_skip_existing:
         overrides["skip_existing"] = False
+    if segment:
+        try:
+            overrides["segments"] = _parse_segments(segment)
+        except ValueError as e:
+            console.print(f"[red]Bad --segment value:[/] {e}")
+            raise typer.Exit(1) from e
     base.update({k: v for k, v in overrides.items() if v is not None})
     cfg = ExtractConfig(**base)
 

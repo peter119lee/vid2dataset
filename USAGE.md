@@ -22,6 +22,7 @@ A practical, parameter-by-parameter guide. **English first, 中文 in italics.**
 7. [Common scenarios](#7-common-scenarios)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Auto-tagging](#9-auto-tagging)
+10. [Advanced mode](#10-advanced-mode)
 
 ---
 
@@ -402,3 +403,25 @@ top-30 tag frequency table — if 90% of images share `full_body`, you know to a
 close-up sources. Hover any image in `_gallery.html` to see its tags.
 
 *rating 标签（general/sensitive/…）永远不会写进 caption；它们只出现在统计里。*
+
+---
+
+## 10. Advanced mode
+
+**(v1.2)** The **Advanced…** button opens a scrubber for the videos in your input folder.
+
+*进阶模式：**进阶模式**按钮打开视频拖动预览窗口。*
+
+- **Segments / 片段**: scrub to a start point → [Set In], scrub to the end → [Set Out].
+  The NEXT Extract run samples only inside the marked ranges (per video). Great for
+  skipping intros/outros or grabbing just the good choreography. CLI equivalent:
+
+  ```bash
+  vid2dataset extract videos/ --segment "dance.mp4:30-95.5" --segment "dance.mp4:120-180"
+  ```
+
+- **Manual capture / 手动截取**: step with −10s/−1s/−1f/+1f/+1s/+10s to the exact frame,
+  press [Capture frame]. It is written immediately through the same letterbox-crop →
+  bucket-resize pipeline as `<video>_manual_00001.png`, **skipping** blur/diversity
+  filters (you chose it on purpose). Captures sit in the normal output folder, so
+  auto-tagging and the gallery include them like any other frame.

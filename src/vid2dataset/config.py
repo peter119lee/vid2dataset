@@ -343,6 +343,15 @@ class ExtractConfig(BaseModel):
         "moved to output/_rejected/ (e.g. 'multiple girls, 2boys').",
     )
 
+    # ── Advanced mode (v1.2) ──────────────────────────────────────────
+    segments: dict[str, list[tuple[float, float]]] = Field(
+        default_factory=dict,
+        description="Per-video time ranges to extract from, in seconds, keyed "
+        "by video FILENAME: {'dance.mp4': [[30.0, 95.5]]}. Videos without an "
+        "entry are processed whole. Set from the GUI Advanced window or "
+        "--segment on the CLI.",
+    )
+
     # ── Gallery output ───────────────────────────────────────────────
     contact_sheet: bool = Field(
         True,
