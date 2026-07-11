@@ -33,6 +33,16 @@ NVIDIA users get GPU SSIM speedup by ticking **GPU 加速** in the app. The firs
 
 No separate GPU .exe needed any more.
 
+### Auto-tagging / 自动打标 (v1.0)
+
+Tick **Auto-tag images**, type your trigger word, extract — every image gets a `.txt` caption sidecar (`trigger, character tags, general tags`), ready for kohya / OneTrainer. The first enable downloads the WD tagger model (wd-eva02-large ~1.2 GB or wd-swinv2 ~450 MB) plus onnxruntime (~25 MB) once; inference is GPU-accelerated on **any** Windows GPU via DirectML, with CPU fallback. / 勾选**自动打标**并填触发词，每张图会生成可直接训练的 `.txt` 标签文件。首次启用下载一次模型，任何显卡都可加速。
+
+Already have images? Caption any folder from the CLI:
+
+```bash
+vid2dataset tag path/to/images --trigger mychar
+```
+
 ### Option C: From source / 从源码安装
 
 ```bash
@@ -87,6 +97,8 @@ Then `vid2dataset app` to launch the GUI, or `vid2dataset extract --help` for CL
 | Watermark cropping (opt-in) | 浮水印裁切 (v0.7) | |
 | Pre-flight HTML report | 訓練前 HTML 報告 (v0.6) | |
 | Gallery with hover info | 畫廊滑鼠 hover 資訊 (v0.7) | |
+| Auto-tagging (WD tagger) | 自动打标 (v1.0) | .txt sidecars, kohya-ready, DirectML |
+| kohya repeats folder | kohya 资料夹结构 (v1.0) | `kohya_repeats` + flatten |
 | Contact sheet + HTML gallery | 缩略图总览 + HTML 画廊 | |
 | ETA estimation | 剩余时间预估 | |
 | Chinese/English UI | 中文/英文界面切换 | |
@@ -174,6 +186,12 @@ vid2dataset app
 | blur_threshold | auto | Auto-detect recommended / 推荐自动检测 |
 | phash_distance | 5 | Near-duplicate detection / 近似重复检测 |
 | min_per_video | 3 | Never 0 output / 保证不为零 |
+
+---
+
+## Scope / 范围
+
+vid2dataset prepares training datasets: extraction, curation, captioning. Permanently **out of scope**: training, upscaling, image editing, prompt tools. / 本工具只做训练集准备（抽帧、筛选、打标）。训练、放大、修图、提示词工具永远不在范围内。
 
 ---
 

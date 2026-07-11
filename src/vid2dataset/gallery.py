@@ -94,20 +94,25 @@ def generate_html_gallery(
         if "blur" in meta:
             meta_lines.append(f"blur {meta['blur']:.1f}")
         if "bucket" in meta:
-            b = meta['bucket']
+            b = meta["bucket"]
             meta_lines.append(f"bucket {b[0]}x{b[1]}")
         if "frame_index" in meta:
             meta_lines.append(f"frame #{meta['frame_index']}")
         if "video" in meta:
             meta_lines.append(f"src: {Path(meta['video']).name}")
+        if meta.get("tags"):
+            tags = [str(x) for x in meta["tags"]]
+            shown = ", ".join(tags[:8]) + (" …" if len(tags) > 8 else "")
+            meta_lines.append(f"tags: {shown}")
         meta_html = (
-            '<div class="meta">' + '<br>'.join(html.escape(s) for s in meta_lines) + '</div>'
-            if meta_lines else ''
+            '<div class="meta">' + "<br>".join(html.escape(s) for s in meta_lines) + "</div>"
+            if meta_lines
+            else ""
         )
         rows.append(
             f'<div class="card"><img loading="lazy" src="{html.escape(rel.as_posix())}" '
             f'alt="{html.escape(p.stem)}">'
-            f'<span>{html.escape(p.stem)}</span>{meta_html}</div>'
+            f"<span>{html.escape(p.stem)}</span>{meta_html}</div>"
         )
 
     html_content = f"""<!DOCTYPE html>

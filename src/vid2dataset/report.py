@@ -36,7 +36,7 @@ def _bucket_histogram(records: list[dict]) -> str:
     total = sum(buckets.values())
     rows = "".join(
         f"<tr><td>{html.escape(k)}</td><td style='text-align:right'>{v}</td>"
-        f"<td><div style='width:{v*300//total}px;height:14px;background:#3b82f6;border-radius:3px'></div></td></tr>"
+        f"<td><div style='width:{v * 300 // total}px;height:14px;background:#3b82f6;border-radius:3px'></div></td></tr>"
         for k, v in buckets.most_common()
     )
     return (
@@ -123,6 +123,36 @@ def _per_video_table(videos: list[dict]) -> str:
     )
 
 
+def _tagging_section(tagging: dict | None) -> str:
+    """Auto-tagging summary section; empty string when tagging did not run."""
+    if not tagging:
+        return ""
+    if tagging.get("error"):
+        return (
+            "<h2>Auto-tagging</h2><p style='color:#f87171'>Tagging failed: "
+            f"{html.escape(str(tagging['error']))}</p>"
+        )
+    top = tagging.get("top_tags") or []
+    rows = "".join(
+        f"<tr><td>{html.escape(str(tag))}</td><td>{int(count)}</td></tr>" for tag, count in top
+    )
+    table = (
+        f"<table><thead><tr><th>tag</th><th>images</th></tr></thead><tbody>{rows}</tbody></table>"
+        if rows
+        else "<p class='info'>No tags above threshold.</p>"
+    )
+    trigger = tagging.get("trigger_word") or "&mdash;"
+    cancelled = " &middot; cancelled early" if tagging.get("cancelled") else ""
+    return f"""<h2>Auto-tagging</h2>
+<div>
+  <span class="stat"><span class="l">Tagged</span><span class="v">{int(tagging.get("tagged", 0))}</span></span>
+  <span class="stat"><span class="l">Failed</span><span class="v">{int(tagging.get("failed", 0))}</span></span>
+  <span class="stat"><span class="l">Trigger word</span><span class="v">{html.escape(str(trigger))}</span></span>
+</div>
+<p class="info">Model: {html.escape(str(tagging.get("model", "")))}{cancelled} &middot; most frequent tags:</p>
+{table}"""
+
+
 def generate_report(
     summary: dict,
     output_path: Path,
@@ -150,6 +180,7 @@ def generate_report(
     blur_html = _blur_histogram(all_records)
     watermark_html = _watermark_table(videos)
     table_html = _per_video_table(videos)
+    tagging_html = _tagging_section(summary.get("tagging"))
 
     css = """
     body { background:#0f172a; color:#e2e8f0; font-family:system-ui,-apple-system,sans-serif;
@@ -185,7 +216,7 @@ def generate_report(
 
 <h2>Watermark check</h2>
 {watermark_html}
-
+{tagging_html}
 <h2>Bucket distribution</h2>
 {bucket_html}
 

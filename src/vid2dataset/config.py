@@ -154,8 +154,7 @@ class ExtractConfig(BaseModel):
     bucket_step: int = Field(
         64,
         ge=8,
-        description="Bucket grid step. Output dims will be multiples of this. "
-        "Anima default: 64.",
+        description="Bucket grid step. Output dims will be multiples of this. Anima default: 64.",
     )
     min_pixels: int = Field(
         500_000,
@@ -171,9 +170,7 @@ class ExtractConfig(BaseModel):
 
     # ── Dedup ─────────────────────────────────────────────────────────
     dedup: bool = Field(True, description="Enable perceptual-hash deduplication.")
-    phash_size: int = Field(
-        8, ge=4, le=16, description="pHash hash size (8 = 64-bit, default)."
-    )
+    phash_size: int = Field(8, ge=4, le=16, description="pHash hash size (8 = 64-bit, default).")
     phash_distance: int = Field(
         5,
         ge=0,
@@ -279,6 +276,43 @@ class ExtractConfig(BaseModel):
         "accurate",
         description="'accurate' = frame-exact seeking (slow but precise); "
         "'keyframe' = snap to nearest I-frame (10-20x faster for 60fps video).",
+    )
+
+    # ── Auto-tagging (optional post-pipeline pass, see tagger.py) ─────
+    tag_images: bool = Field(
+        False,
+        description="Run the WD tagger after extraction and write a .txt "
+        "caption sidecar next to every image. First enable downloads the "
+        "model (+ onnxruntime in the .exe) to a per-user cache.",
+    )
+    trigger_word: str = Field(
+        "",
+        description="LoRA trigger word. Written as the first caption token "
+        "in every sidecar. Leave empty for no trigger.",
+    )
+    tagger_model: str = Field(
+        "wd-eva02-large-tagger-v3",
+        description="WD tagger model (wd-eva02-large-tagger-v3 = most "
+        "accurate, ~1.2 GB; wd-swinv2-tagger-v3 = lighter, ~450 MB).",
+    )
+    tag_general_threshold: float = Field(
+        0.35,
+        ge=0.05,
+        le=0.95,
+        description="Minimum confidence for general tags.",
+    )
+    tag_character_threshold: float = Field(
+        0.85,
+        ge=0.05,
+        le=0.95,
+        description="Minimum confidence for character tags.",
+    )
+    kohya_repeats: int = Field(
+        0,
+        ge=0,
+        le=1000,
+        description="If >0 (and flatten_output is on), images land in a "
+        "'<N>_<trigger>' subfolder — the kohya-ss repeats folder convention.",
     )
 
     # ── Gallery output ───────────────────────────────────────────────

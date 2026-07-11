@@ -58,6 +58,7 @@ class App(ctk.CTk):
         self.prefs = _load_prefs()
         self.lang = self.prefs.get("lang", "en")
         self._running = False
+        self._downloading_tagger = False
         self._cancel_event: threading.Event | None = None
         self._build()
         self._apply_preset(self.prefs.get("preset", "anima-style"))
@@ -71,6 +72,15 @@ class App(ctk.CTk):
         if self.prefs.get("output"):
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, self.prefs["output"])
+        # Restore tagging settings (checkbox stays user-armed each session:
+        # re-ticking runs the availability check without surprise downloads)
+        if self.prefs.get("trigger_word"):
+            self.trigger_entry.insert(0, str(self.prefs["trigger_word"]))
+        if self.prefs.get("tagger_model") in (
+            "wd-eva02-large-tagger-v3",
+            "wd-swinv2-tagger-v3",
+        ):
+            self.tagger_model_var.set(str(self.prefs["tagger_model"]))
 
     def _build(self) -> None:
         self.title(f"vid2dataset {__version__}")
@@ -230,6 +240,34 @@ class App(ctk.CTk):
         self.chk_gpu.pack(side="left", padx=(0, 14))
         Tooltip(self.chk_gpu, lambda: t("tip_gpu", self.lang), wraplength=380)
 
+        # Tagging row (optional post-pipeline pass)
+        tagrow = ctk.CTkFrame(settings, fg_color="transparent")
+        tagrow.grid(row=4, column=0, columnspan=4, padx=8, pady=(0, 10), sticky="w")
+        self.tag_var = ctk.BooleanVar(value=False)
+        self.chk_tag = ctk.CTkCheckBox(
+            tagrow,
+            text=t("tag_images", self.lang),
+            variable=self.tag_var,
+            command=self._on_tag_toggle,
+        )
+        self.chk_tag.pack(side="left", padx=(4, 12))
+        Tooltip(self.chk_tag, lambda: t("tip_tag", self.lang), wraplength=380)
+        self.trigger_lbl = ctk.CTkLabel(
+            tagrow, text=t("trigger_word", self.lang), font=ctk.CTkFont(size=11)
+        )
+        self.trigger_lbl.pack(side="left", padx=(0, 4))
+        self.trigger_entry = ctk.CTkEntry(tagrow, width=170)
+        self.trigger_entry.pack(side="left", padx=(0, 12))
+        Tooltip(self.trigger_entry, lambda: t("tip_trigger", self.lang), wraplength=380)
+        self.tagger_model_var = ctk.StringVar(value="wd-eva02-large-tagger-v3")
+        self.tagger_model_menu = ctk.CTkOptionMenu(
+            tagrow,
+            variable=self.tagger_model_var,
+            width=220,
+            values=["wd-eva02-large-tagger-v3", "wd-swinv2-tagger-v3"],
+        )
+        self.tagger_model_menu.pack(side="left")
+
         # Run
         run_frame = ctk.CTkFrame(self, fg_color="transparent")
         run_frame.grid(row=3, column=0, sticky="ew", padx=24, pady=6)
@@ -307,6 +345,87 @@ class App(ctk.CTk):
         if p:
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, p)
+
+    def _on_tag_toggle(self) -> None:
+        """Called when the Auto-tag checkbox is ticked.
+
+        If the model and onnxruntime are present, nothing to do (loading
+        happens during the run). Otherwise prompt for the one-time download.
+        """
+        if not self.tag_var.get():
+            return
+
+        from vid2dataset import tagger_runtime
+        from vid2dataset.tagger import download_size_mb, model_status
+
+        model = self.tagger_model_var.get()
+        model_ok, _ = model_status(model)
+        runtime_ok = tagger_runtime.onnxruntime_available() or tagger_runtime.runtime_cached()
+        if model_ok and runtime_ok:
+            return
+
+        mb = tagger_runtime.total_first_enable_mb(download_size_mb(model))
+        ans = messagebox.askyesno(
+            "vid2dataset", t("tag_download_prompt", self.lang, model=model, mb=mb)
+        )
+        if not ans:
+            self.tag_var.set(False)
+            return
+        self._download_tagger_assets(model)
+
+    def _download_tagger_assets(self, model: str) -> None:
+        """Download onnxruntime + tagger model in a background thread.
+
+        Starting an extraction run while this download is in flight would race
+        it (the run's tagging pass downloads the same files), so _start() is
+        blocked via _downloading_tagger and the Run button is disabled.
+        """
+        self._downloading_tagger = True
+        self.chk_tag.configure(state="disabled")
+        self.run_btn.configure(state="disabled")
+        self.status_var.set(t("tag_downloading", self.lang))
+        self.progress.start()
+
+        def progress_cb(label: str, done: int, total: int) -> None:
+            if total > 0:
+                pct = done * 100 // total
+                txt = t("gpu_downloading_pkg", self.lang, pkg=label, pct=pct)
+                self.after(0, lambda s=txt: self.status_var.set(s))
+
+        def worker() -> None:
+            err = ""
+            try:
+                from vid2dataset import tagger_runtime
+                from vid2dataset.tagger import download_model, model_status
+
+                tagger_runtime.ensure_onnxruntime(progress=progress_cb)
+                ok, _ = model_status(model)
+                if not ok:
+                    download_model(model, progress=progress_cb)
+            except Exception as exc:  # noqa: BLE001 — shown to the user
+                err = str(exc)
+            self.after(0, lambda: self._on_tag_download_done(err))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_tag_download_done(self, err: str) -> None:
+        self._downloading_tagger = False
+        self.chk_tag.configure(state="normal")
+        if not self._running:
+            # Don't touch the progress bar / Run button / status of an
+            # extraction run that started after the download was armed.
+            self.progress.stop()
+            self.progress.set(0)
+            self.run_btn.configure(state="normal")
+        if err:
+            self.tag_var.set(False)
+            if not self._running:
+                self.status_var.set(t("tag_download_failed", self.lang))
+            messagebox.showerror(
+                t("error", self.lang), f"{t('tag_download_failed', self.lang)}: {err}"
+            )
+        elif not self._running:
+            self.status_var.set(t("tag_ready", self.lang))
 
     def _on_gpu_toggle(self) -> None:
         """Called when user clicks the GPU checkbox.
@@ -598,6 +717,8 @@ class App(ctk.CTk):
         self.chk_wm.configure(text=t("watermark", self.lang))
         self.chk_crop_wm.configure(text=t("crop_watermark", self.lang))
         self.chk_flatten.configure(text=t("flatten_output", self.lang))
+        self.chk_tag.configure(text=t("tag_images", self.lang))
+        self.trigger_lbl.configure(text=t("trigger_word", self.lang))
         # Refresh all parameter labels
         for key, lbl in self._param_labels.items():
             lbl.configure(text=t(key, self.lang))
@@ -627,7 +748,7 @@ class App(ctk.CTk):
         self.log_box.configure(state="disabled")
 
     def _start(self) -> None:
-        if self._running:
+        if self._running or self._downloading_tagger:
             return
         inp = self.input_entry.get().strip()
         out = self.output_entry.get().strip() or "output"
@@ -640,8 +761,16 @@ class App(ctk.CTk):
                 f"{t('not_found', self.lang)}\n{inp}",
             )
             return
-        # Save paths
-        self.prefs.update({"input": inp, "output": out, "preset": self.preset_var.get()})
+        # Save paths + tagging prefs
+        self.prefs.update(
+            {
+                "input": inp,
+                "output": out,
+                "preset": self.preset_var.get(),
+                "trigger_word": self.trigger_entry.get().strip(),
+                "tagger_model": self.tagger_model_var.get(),
+            }
+        )
         _save_prefs(self.prefs)
 
         self._running = True
@@ -673,6 +802,9 @@ class App(ctk.CTk):
                     "crop_watermark": self.crop_wm_var.get(),
                     "flatten_output": self.flatten_var.get(),
                     "gpu_accel": self.gpu_var.get(),
+                    "tag_images": self.tag_var.get(),
+                    "trigger_word": self.trigger_entry.get().strip(),
+                    "tagger_model": self.tagger_model_var.get(),
                 }
             )
             for key, entry in self._params.items():
@@ -705,6 +837,22 @@ class App(ctk.CTk):
 
             def progress_cb(stage: str, current: int, total: int) -> None:
                 nonlocal last_video_start
+                if stage == "tag:tagging":
+                    self.after(
+                        0,
+                        lambda c=current, tt=total: self.status_var.set(
+                            t("tagging_progress", self.lang, current=c, total=tt)
+                        ),
+                    )
+                    return
+                if stage.startswith("tag:"):
+                    # Tagger model / onnxruntime download progress (bytes).
+                    if total > 0:
+                        pct = current * 100 // total
+                        label = stage.split(":", 1)[1]
+                        txt = t("gpu_downloading_pkg", self.lang, pkg=label, pct=pct)
+                        self.after(0, lambda s=txt: self.status_var.set(s))
+                    return
                 if stage == "video":
                     now = time.perf_counter()
                     if current > 0:

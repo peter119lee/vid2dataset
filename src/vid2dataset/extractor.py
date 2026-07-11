@@ -116,6 +116,7 @@ class PipelineResult:
     elapsed_s: float
     contact_sheet_path: str | None = None
     html_gallery_path: str | None = None
+    tagging: dict | None = None
 
     def to_summary_dict(self) -> dict:
         return {
@@ -124,6 +125,7 @@ class PipelineResult:
             "elapsed_s": round(self.elapsed_s, 2),
             "contact_sheet": self.contact_sheet_path,
             "html_gallery": self.html_gallery_path,
+            "tagging": self.tagging,
             "videos": [
                 {
                     "video": v.video,
@@ -171,9 +173,23 @@ def _resize_to_bucket(
     return out, bucket
 
 
+def _kohya_subdir(cfg: ExtractConfig) -> str | None:
+    """kohya-ss repeats folder name ('10_mychar'), or None when not configured.
+
+    Only applies with flatten_output: per-video subfolders and repeats
+    folders are mutually exclusive layouts.
+    """
+    if not (cfg.flatten_output and cfg.kohya_repeats > 0):
+        return None
+    trigger = " ".join(cfg.trigger_word.split())
+    name = sanitize_stem(trigger) if trigger else "dataset"
+    return f"{cfg.kohya_repeats}_{name}"
+
+
 def _output_dir_for(cfg: ExtractConfig, video: Path) -> Path:
+    sub = _kohya_subdir(cfg)
     if cfg.flatten_output:
-        return cfg.output
+        return cfg.output / sub if sub else cfg.output
     return cfg.output / sanitize_stem(video.stem)
 
 
@@ -182,8 +198,11 @@ def _stats_path(cfg: ExtractConfig, video: Path) -> Path:
 
 
 class _NullLock:
-    def __enter__(self): return self
-    def __exit__(self, *a): return False
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
 
 
 def _process_video(
@@ -206,8 +225,12 @@ def _process_video(
 
     log.info(
         "Processing %s (%dx%d, %.1fs, %d frames, mode=%s)",
-        video.name, meta.width, meta.height, meta.duration_s,
-        meta.frame_count, cfg.decode_mode,
+        video.name,
+        meta.width,
+        meta.height,
+        meta.duration_s,
+        meta.frame_count,
+        cfg.decode_mode,
     )
 
     # Watermark scan (warn-only by default, never modifies output bytes).
@@ -218,7 +241,11 @@ def _process_video(
             for wm in watermark_regions:
                 log.warning(
                     "Watermark suspected in %s at %s (%dx%d, conf=%.2f) \u2014 not cropped",
-                    video.name, wm.location, wm.w, wm.h, wm.confidence,
+                    video.name,
+                    wm.location,
+                    wm.w,
+                    wm.h,
+                    wm.confidence,
                 )
         except Exception as e:  # noqa: BLE001
             log.debug("watermark scan failed for %s: %s", video.name, e)
@@ -294,8 +321,8 @@ def _process_video(
     if cfg.ssim_filter:
         ssim_filter = (
             BatchSSIMFilter(ssim_threshold=cfg.ssim_threshold)
-            if use_gpu_filters else
-            DiversityFilter(ssim_threshold=cfg.ssim_threshold)
+            if use_gpu_filters
+            else DiversityFilter(ssim_threshold=cfg.ssim_threshold)
         )
     else:
         ssim_filter = None
@@ -336,6 +363,7 @@ def _process_video(
             except (ImportError, OSError) as e:
                 log.warning("ffmpeg path failed (%s); falling back to OpenCV", e)
                 yield from read_frames_at(video, indices, seek_accurate=seek_mode)
+
         frame_iter = _frame_source()
     else:
         frame_iter = read_frames_at(video, indices, seek_accurate=seek_mode)
@@ -348,11 +376,15 @@ def _process_video(
 
         # Letterbox crop first, optionally expanded to remove watermarks.
         if cfg.detect_letterbox or (cfg.crop_watermark and watermark_regions):
-            rect = detect_letterbox(
-                frame_bgr,
-                threshold=cfg.letterbox_threshold,
-                min_ratio=cfg.letterbox_min_ratio,
-            ) if cfg.detect_letterbox else None
+            rect = (
+                detect_letterbox(
+                    frame_bgr,
+                    threshold=cfg.letterbox_threshold,
+                    min_ratio=cfg.letterbox_min_ratio,
+                )
+                if cfg.detect_letterbox
+                else None
+            )
             base_x, base_y, base_w, base_h = (
                 (rect.x, rect.y, rect.w, rect.h)
                 if rect is not None
@@ -425,7 +457,7 @@ def _process_video(
         h = None
         if cfg.dedup and dedup_index is not None:
             h = hash_image(out_img, hash_size=cfg.phash_size)
-            with (dedup_lock if dedup_lock else _NullLock()):
+            with dedup_lock if dedup_lock else _NullLock():
                 dup = dedup_index.is_duplicate(h)
             if dup is not None:
                 stats.rejected_dup += 1
@@ -436,21 +468,27 @@ def _process_video(
         stem = f"{sanitize_stem(video.stem)}_{seq:05d}"
         out_path = out_dir / f"{stem}.{cfg.output_format}"
         writer.submit(
-            out_img, out_path, fmt=cfg.output_format,
-            jpg_quality=cfg.jpg_quality, webp_quality=cfg.webp_quality,
+            out_img,
+            out_path,
+            fmt=cfg.output_format,
+            jpg_quality=cfg.jpg_quality,
+            webp_quality=cfg.webp_quality,
         )
         if ssim_filter is not None:
             ssim_filter.accept(out_img)
         if color_filter is not None:
             color_filter.accept(out_img)
         if cfg.dedup and dedup_index is not None and h is not None:
-            with (dedup_lock if dedup_lock else _NullLock()):
+            with dedup_lock if dedup_lock else _NullLock():
                 dedup_index.add(h, str(out_path))
 
         stats.records.append(
             FrameRecord(
-                video=str(video), frame_index=idx, out_path=str(out_path),
-                blur=q.blur_score, bucket=(bucket.width, bucket.height),
+                video=str(video),
+                frame_index=idx,
+                out_path=str(out_path),
+                blur=q.blur_score,
+                bucket=(bucket.width, bucket.height),
                 pixels=bucket.pixels,
             )
         )
@@ -481,16 +519,22 @@ def _process_video(
             stem = f"{sanitize_stem(video.stem)}_{seq:05d}"
             out_path = out_dir / f"{stem}.{cfg.output_format}"
             writer.submit(
-                b_img, out_path, fmt=cfg.output_format,
-                jpg_quality=cfg.jpg_quality, webp_quality=cfg.webp_quality,
+                b_img,
+                out_path,
+                fmt=cfg.output_format,
+                jpg_quality=cfg.jpg_quality,
+                webp_quality=cfg.webp_quality,
             )
             if cfg.dedup and dedup_index is not None:
                 bh = hash_image(b_img, hash_size=cfg.phash_size)
                 dedup_index.add(bh, str(out_path))
             stats.records.append(
                 FrameRecord(
-                    video=str(video), frame_index=b_idx, out_path=str(out_path),
-                    blur=b_blur, bucket=(b_bucket.width, b_bucket.height),
+                    video=str(video),
+                    frame_index=b_idx,
+                    out_path=str(out_path),
+                    blur=b_blur,
+                    bucket=(b_bucket.width, b_bucket.height),
                     pixels=b_bucket.pixels,
                 )
             )
@@ -500,7 +544,8 @@ def _process_video(
         if added > 0:
             log.info(
                 "Min guarantee: added %d backup frames for %s",
-                added, video.name,
+                added,
+                video.name,
             )
 
     writer.close()  # block until all PNG writes complete
@@ -554,6 +599,7 @@ def run_pipeline(
     # Log GPU pipeline state
     if cfg.gpu_accel:
         from vid2dataset.gpu_filters import device_summary
+
         log.info("%s", device_summary())
 
     selected_hwaccel: str | None = None
@@ -610,9 +656,14 @@ def run_pipeline(
             return None
         try:
             return _process_video(
-                video, cfg=cfg, buckets=buckets,
-                dedup_index=dedup_index, dedup_lock=dedup_lock,
-                seq_offset=seq_off, progress=progress, cancel_event=cancel_event,
+                video,
+                cfg=cfg,
+                buckets=buckets,
+                dedup_index=dedup_index,
+                dedup_lock=dedup_lock,
+                seq_offset=seq_off,
+                progress=progress,
+                cancel_event=cancel_event,
                 hwaccel=selected_hwaccel,
             )
         except (cv2.error, OSError, ValueError) as e:
@@ -662,17 +713,51 @@ def run_pipeline(
 
     elapsed = time.perf_counter() - t_start
 
+    all_image_paths = [Path(r.out_path) for vs in all_stats for r in vs.records]
+
+    # ── Auto-tagging (optional post-pipeline pass) ────────────────
+    # Lazy import keeps the extraction core independent of the tagger
+    # module; a tagging failure must never kill an otherwise good run.
+    tag_info: dict | None = None
+    tag_per_image: dict[str, list[str]] = {}
+    if cfg.tag_images and all_image_paths and not (cancel_event and cancel_event.is_set()):
+        try:
+            from vid2dataset.tagger import tag_folder
+
+            ts = tag_folder(
+                cfg.output,
+                model_name=cfg.tagger_model,
+                trigger_word=cfg.trigger_word,
+                general_threshold=cfg.tag_general_threshold,
+                character_threshold=cfg.tag_character_threshold,
+                progress_cb=(
+                    (lambda stage, done, total: progress(f"tag:{stage}", done, total))
+                    if progress
+                    else None
+                ),
+                cancel_event=cancel_event,
+            )
+            tag_per_image = ts.per_image
+            tag_info = {
+                "tagged": ts.tagged,
+                "failed": ts.failed,
+                "total": ts.total,
+                "cancelled": ts.cancelled,
+                "trigger_word": " ".join(cfg.trigger_word.split()),
+                "model": cfg.tagger_model,
+                "top_tags": ts.tag_counts.most_common(30),
+            }
+            log.info("Tagged %d/%d images (%d failed)", ts.tagged, ts.total, ts.failed)
+        except Exception as e:  # noqa: BLE001
+            log.error("Tagging pass failed: %s", e)
+            tag_info = {"error": str(e)}
+
     # ── Gallery generation ───────────────────────────────────────
-    all_image_paths = [
-        Path(r.out_path) for vs in all_stats for r in vs.records
-    ]
     cs_path = None
     html_path = None
 
     if cfg.contact_sheet and all_image_paths:
-        cs = generate_contact_sheet(
-            all_image_paths, cfg.output / "_contact_sheet.png"
-        )
+        cs = generate_contact_sheet(all_image_paths, cfg.output / "_contact_sheet.png")
         cs_path = str(cs) if cs else None
 
     if cfg.html_gallery and all_image_paths:
@@ -686,8 +771,19 @@ def run_pipeline(
                     "frame_index": r.frame_index,
                     "video": vs.video,
                 }
+        if tag_per_image:
+            out_root = cfg.output.resolve()
+            for p, meta in gallery_meta.items():
+                try:
+                    rel = p.resolve().relative_to(out_root).as_posix()
+                except ValueError:
+                    continue
+                tags = tag_per_image.get(rel)
+                if tags:
+                    meta["tags"] = tags
         hg = generate_html_gallery(
-            all_image_paths, cfg.output / "_gallery.html",
+            all_image_paths,
+            cfg.output / "_gallery.html",
             metadata=gallery_meta,
         )
         html_path = str(hg) if hg else None
@@ -710,13 +806,13 @@ def run_pipeline(
                     "rejected_dup": v.rejected_dup,
                     "elapsed_s": v.elapsed_s,
                     "watermarks": v.watermarks,
-                    "records": [
-                        {"blur": r.blur, "bucket": list(r.bucket)} for r in v.records
-                    ],
+                    "records": [{"blur": r.blur, "bucket": list(r.bucket)} for r in v.records],
                 }
                 for v in all_stats
             ],
         }
+        if tag_info is not None:
+            report_summary["tagging"] = tag_info
         generate_report(report_summary, cfg.output / "_report.html")
     except Exception as e:  # noqa: BLE001
         log.debug("report generation failed: %s", e)
@@ -729,6 +825,7 @@ def run_pipeline(
         elapsed_s=elapsed,
         contact_sheet_path=cs_path,
         html_gallery_path=html_path,
+        tagging=tag_info,
     )
 
     summary_path = cfg.output / "_run_summary.json"
@@ -738,6 +835,8 @@ def run_pipeline(
     )
     log.info(
         "Done: %d images written across %d videos in %.1fs",
-        result.total_written, len(all_stats), elapsed,
+        result.total_written,
+        len(all_stats),
+        elapsed,
     )
     return result

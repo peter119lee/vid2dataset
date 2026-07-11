@@ -4,6 +4,36 @@ All notable changes to vid2dataset are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning is [SemVer](https://semver.org/).
 
+## [1.0.0] - 2026-07-11
+
+### Added
+- **Auto-tagging (WD tagger)**: tick `Auto-tag images`, set a trigger word,
+  and every output image gets a kohya-ready `.txt` caption sidecar
+  (`trigger, character tags, general tags`). Models: wd-eva02-large-tagger-v3
+  (default, ~1.2 GB) and wd-swinv2-tagger-v3 (~450 MB), downloaded on first
+  enable to `%LOCALAPPDATA%/vid2dataset/tagger_models/` (huggingface.co with
+  hf-mirror.com fallback). Inference via onnxruntime-DirectML — GPU-accelerated
+  on any Windows GPU vendor, automatic CPU fallback. The .exe does not grow;
+  onnxruntime (~60 MB) downloads on demand like the GPU runtime.
+- **`vid2dataset tag FOLDER`** CLI: caption any existing image folder
+  (`--trigger`, `--model`, `--threshold`, `--character-threshold`, `--cpu`).
+- **kohya repeats folder**: set `kohya_repeats = 10` (config) with
+  `flatten_output` to write images into a `10_<trigger>/` subfolder — the
+  kohya-ss dreambooth folder convention.
+- **Report + gallery**: `_report.html` gains an Auto-tagging section with
+  tagged/failed counts and a top-30 tag frequency table (spot dataset bias
+  at a glance); `_gallery.html` hover info now shows each image's tags.
+- Caption formatting follows kohya conventions and the sd-image-sorter tagger
+  audit: single LF-terminated line, underscores to spaces with a kaomoji
+  preserve list (`^_^` stays `^_^`), case-insensitive dedup, rating tags never
+  enter captions.
+
+### Notes
+- Tagging is OFF by default and runs as a strictly separate post-pipeline
+  pass — extraction behavior is byte-identical when the box is unticked.
+- Scope guard: vid2dataset prepares datasets. Training, upscaling, image
+  editing, and prompt tools are permanently out of scope.
+
 ## [0.9.0] - 2026-07-11
 
 ### Fixed

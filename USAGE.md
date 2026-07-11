@@ -21,6 +21,7 @@ A practical, parameter-by-parameter guide. **English first, 中文 in italics.**
 6. [Output structure](#6-output-structure)
 7. [Common scenarios](#7-common-scenarios)
 8. [Troubleshooting](#8-troubleshooting)
+9. [Auto-tagging](#9-auto-tagging)
 
 ---
 
@@ -358,3 +359,41 @@ Should work since v0.2.0. If it doesn't:
 ## Reference: every config field
 
 For the full list with types and validators, see [`src/vid2dataset/config.py`](src/vid2dataset/config.py).
+
+---
+
+## 9. Auto-tagging
+
+**(v1.0)** Tick **Auto-tag images** in the GUI (or `tag_images = true`) and every
+output image gets a `.txt` caption sidecar: `trigger word, character tags, general tags`.
+Drop the folder straight into kohya / OneTrainer.
+
+*勾选**自动打标**（或 `tag_images = true`），每张输出图片会得到一个 `.txt` 标签文件：
+`触发词, 角色标签, 通用标签`，可直接用于 kohya / OneTrainer。*
+
+| Setting | Default | Notes |
+|---|---|---|
+| `tagger_model` | `wd-eva02-large-tagger-v3` | Most accurate, ~1.2 GB. `wd-swinv2-tagger-v3` is ~450 MB and faster on CPU. |
+| `trigger_word` | *(empty)* | Written first in every caption. Use one rare token, e.g. `mychar_v1`. |
+| `tag_general_threshold` | 0.35 | Lower = more (noisier) tags. 0.25-0.30 for style LoRAs wanting rich captions. |
+| `tag_character_threshold` | 0.85 | Keep high — false character tags actively hurt training. |
+| `kohya_repeats` | 0 (off) | With **Flatten output**: images land in `output/<N>_<trigger>/` (kohya dreambooth folder convention). |
+
+**First enable** downloads the model + onnxruntime (~25 MB) once to
+`%LOCALAPPDATA%/vid2dataset/`. Inference uses DirectML — GPU-accelerated on any
+Windows GPU vendor (NVIDIA/AMD/Intel), automatic CPU fallback. Delete
+`%LOCALAPPDATA%/vid2dataset/tagger_models` / `tagger_runtime` to reclaim space or
+force a re-download.
+
+**Standalone CLI** — caption a folder you already have (any source):
+
+```bash
+vid2dataset tag path/to/images --trigger mychar
+vid2dataset tag path/to/images -m wd-swinv2-tagger-v3 --threshold 0.30 --cpu
+```
+
+**Check your captions**: `_report.html` gains an *Auto-tagging* section with a
+top-30 tag frequency table — if 90% of images share `full_body`, you know to add
+close-up sources. Hover any image in `_gallery.html` to see its tags.
+
+*rating 标签（general/sensitive/…）永远不会写进 caption；它们只出现在统计里。*

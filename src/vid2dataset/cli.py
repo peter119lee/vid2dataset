@@ -349,6 +349,81 @@ def _print_summary(result: PipelineResult) -> None:
         console.print(f"[dim]HTML gallery:[/] {result.html_gallery_path}")
 
 
+@app.command("tag")
+def tag(
+    folder: Annotated[Path, typer.Argument(help="Folder of images to caption.")],
+    trigger: Annotated[
+        str, typer.Option("--trigger", "-t", help="LoRA trigger word (first caption token).")
+    ] = "",
+    model: Annotated[str, typer.Option("--model", "-m", help="WD tagger model name.")] = (
+        "wd-eva02-large-tagger-v3"
+    ),
+    threshold: Annotated[
+        float, typer.Option("--threshold", help="General tag confidence threshold.")
+    ] = 0.35,
+    character_threshold: Annotated[
+        float, typer.Option("--character-threshold", help="Character tag threshold.")
+    ] = 0.85,
+    cpu: Annotated[bool, typer.Option("--cpu", help="Force CPU inference.")] = False,
+) -> None:
+    """Write WD-tagger caption .txt sidecars for an existing image folder.
+
+    Works on any folder — not just vid2dataset output. Downloads the model
+    (and onnxruntime if needed) to a per-user cache on first use.
+    """
+    from vid2dataset.tagger import TAGGER_MODELS, collect_images, tag_folder
+
+    if not folder.exists():
+        console.print(f"[red]Path not found:[/] {folder}")
+        raise typer.Exit(1)
+    if model not in TAGGER_MODELS:
+        console.print(f"[red]Unknown model:[/] {model}. Available: {', '.join(TAGGER_MODELS)}")
+        raise typer.Exit(1)
+    n_images = len(collect_images(folder))
+    if n_images == 0:
+        console.print(f"[yellow]No images found under[/] {folder}")
+        raise typer.Exit(0)
+
+    console.print(f"Tagging [bold]{n_images}[/] images with [bold]{model}[/]...")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as prog:
+        task_id = prog.add_task("preparing", total=n_images)
+
+        def cb(stage: str, done: int, total: int) -> None:
+            if stage == "tagging":
+                prog.update(task_id, description="tagging", completed=done, total=total)
+            elif total > 0:  # download progress (bytes)
+                prog.update(
+                    task_id,
+                    description=f"downloading {stage}",
+                    completed=done // 1048576,
+                    total=total // 1048576,
+                )
+
+        summary = tag_folder(
+            folder,
+            model_name=model,
+            trigger_word=trigger,
+            general_threshold=threshold,
+            character_threshold=character_threshold,
+            use_gpu=not cpu,
+            progress_cb=cb,
+        )
+
+    console.print(
+        f"[green]Done:[/] {summary.tagged} tagged, {summary.failed} failed (of {summary.total})."
+    )
+    if summary.tag_counts:
+        top = ", ".join(f"{t} ({c})" for t, c in summary.tag_counts.most_common(10))
+        console.print(f"[dim]Top tags:[/] {top}")
+
+
 @app.command("gpu-test")
 def gpu_test() -> None:
     """Diagnose GPU runtime activation. Prints what loads / what fails.
